@@ -22,6 +22,7 @@ class Client implements CurationClient {
   readonly sessions = new Map<string, CurationSession>()
   readonly prompts: string[] = []
   readonly aborts: string[] = []
+  readonly abortStarted = Promise.withResolvers<void>()
   finalText = ""
   finalError: string | undefined
   finalCalls = 0
@@ -49,6 +50,7 @@ class Client implements CurationClient {
   }
 
   async abort(sessionID: string): Promise<void> {
+    this.abortStarted.resolve()
     this.aborts.push(sessionID)
     if (this.abortBarrier !== undefined) await this.abortBarrier
   }
@@ -183,6 +185,7 @@ describe("persisted curation fencing", () => {
     client.abortBarrier = abort.promise
 
     scheduler.fire()
+    await client.abortStarted.promise
     await curation.handleEvent({ type: "session.status", properties: { sessionID: fixture.childID, status: { type: "idle" } } })
     abort.resolve()
     await curation.waitForBackgroundWork()
