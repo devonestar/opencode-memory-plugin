@@ -14,15 +14,18 @@ deterministically at write time (secret rejection, minimum body length, cross-sc
 detection, pointer length). Judgement-heavy curation — "is this actually worth remembering?" —
 happens here, in batch, so it never adds latency or a failure mode to a save.
 
+The memory root is `${XDG_CONFIG_HOME:-~/.config}/opencode/memory/`; when `XDG_CONFIG_HOME`
+is unset or empty, this expands to `~/.config/opencode/memory/`.
+
 When enabled, automatic curation runs rarely and writes private reports under
-`~/.config/opencode/memory/.curation/projects/<namespace>/runs/<run-id>/report.md`. Use
+`${XDG_CONFIG_HOME:-~/.config}/opencode/memory/.curation/projects/<namespace>/runs/<run-id>/report.md`. Use
 `/memory-curation-status` to confirm whether a report exists without exposing internal paths. This command remains the manual, review-only
 fallback for ambiguous findings and never applies changes.
 
 ## Stores to audit
 
-- **Global**: `~/.config/opencode/memory/` — `MEMORY.md` index plus `<slug>.md` topic files
-- **Project**: `~/.config/opencode/memory/projects/<namespace>/` — same layout, one namespace per
+- **Global**: `${XDG_CONFIG_HOME:-~/.config}/opencode/memory/` — `MEMORY.md` index plus `<slug>.md` topic files
+- **Project**: `${XDG_CONFIG_HOME:-~/.config}/opencode/memory/projects/<namespace>/` — same layout, one namespace per
   repository identity (git remote) or per canonical directory (non-git)
 
 ## Procedure

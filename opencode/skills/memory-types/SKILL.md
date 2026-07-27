@@ -10,11 +10,13 @@ You have already decided *that* something is worth remembering. This skill is *h
 ## Scope: which store it goes to (REQUIRED, no default)
 
 `scope` decides *where the memory lives*. There is no default — you must choose.
+The memory root is `${XDG_CONFIG_HOME:-~/.config}/opencode/memory/`; when `XDG_CONFIG_HOME`
+is unset or empty, this expands to `~/.config/opencode/memory/`.
 
 | `scope` | Store | Use for |
 |---|---|---|
-| `global` | `~/.config/opencode/memory/` | Person-level preferences, org-wide systems, workflows that apply across essentially every workspace |
-| `project` | `~/.config/opencode/memory/projects/<namespace>/` | Facts specific to this repository, product, or codebase |
+| `global` | `${XDG_CONFIG_HOME:-~/.config}/opencode/memory/` | Person-level preferences, org-wide systems, workflows that apply across essentially every workspace |
+| `project` | `${XDG_CONFIG_HOME:-~/.config}/opencode/memory/projects/<namespace>/` | Facts specific to this repository, product, or codebase |
 
 - **If uncertain, choose `project`.** A wrong `project` choice pollutes one workspace; a wrong `global` choice pollutes every workspace.
 - **`scope` and `type` are orthogonal.** `type: project` does NOT imply `scope: project`. A merge-freeze for one repo is `type: project` + `scope: project`; the fact that the whole org tracks bugs in Jira ADE is `type: reference` + `scope: global`.
