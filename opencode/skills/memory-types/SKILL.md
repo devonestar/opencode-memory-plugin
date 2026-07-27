@@ -1,0 +1,78 @@
+---
+name: memory-types
+description: Scope selection, body structure, frontmatter format, type selection, and examples for saving a memory with the memory_save tool. Load this the moment you decide to persist a learning (a user preference, a correction/confirmation, a non-derivable project fact, or an external-system pointer).
+---
+
+# Saving a memory: form and discipline
+
+You have already decided *that* something is worth remembering. This skill is *how* to shape it. The `memory_save` tool performs the two-step write (memory file + index pointer) and the integrity checks; your job is to choose the right `scope`, the right `type`, write a specific `description`, and structure the `body`.
+
+## Scope: which store it goes to (REQUIRED, no default)
+
+`scope` decides *where the memory lives*. There is no default — you must choose.
+
+| `scope` | Store | Use for |
+|---|---|---|
+| `global` | `~/.config/opencode/memory/` | Person-level preferences, org-wide systems, workflows that apply across essentially every workspace |
+| `project` | `~/.config/opencode/memory/projects/<namespace>/` | Facts specific to this repository, product, or codebase |
+
+- **If uncertain, choose `project`.** A wrong `project` choice pollutes one workspace; a wrong `global` choice pollutes every workspace.
+- **`scope` and `type` are orthogonal.** `type: project` does NOT imply `scope: project`. A merge-freeze for one repo is `type: project` + `scope: project`; the fact that the whole org tracks bugs in Jira ADE is `type: reference` + `scope: global`.
+- The project store is keyed by repository identity, so it is shared across git worktrees and re-clones of the same remote. Non-git directories get a stable path-derived namespace.
+- Only a **primary session** may persist memory. If you are a subagent, `memory_save` will reject the write — hand the finding to your parent session instead and let it decide.
+
+## Frontmatter (what `memory_save` writes)
+
+```
+---
+name: <short-kebab-slug>          # also the filename stem, e.g. user-role
+description: <one specific line>  # the index hook — used to judge relevance in future sessions
+metadata:
+  type: user | feedback | project | reference
+---
+<body>
+```
+
+- `description` is the only thing loaded into every future session (via the index). Make it specific enough to judge relevance from alone. "data scientist focused on logging" — not "about the user".
+- Cross-link related memories in the body with `[[other-slug]]`. Link liberally; a `[[slug]]` with no target yet just marks something worth writing later.
+
+## The four types
+
+### `user` — who you are collaborating with (ALWAYS private)
+Role, expertise, responsibilities, working preferences. Goal: tailor future behavior to this specific person. Save when you learn any durable detail about them. Avoid negative judgements.
+> user: "I've written Go for ten years but this is my first time in this React codebase"
+> → save `user`: deep Go expertise, new to React/this frontend — frame frontend explanations via backend analogues.
+
+### `feedback` — how you should approach the work
+Corrections **and** confirmations. Corrections are loud ("no, don't"); confirmations are quiet ("yes, exactly — keep doing that") — watch for both. Include **why**.
+**Body structure:** the rule, then a `**Why:**` line (the reason/incident), then a `**How to apply:**` line (when it kicks in).
+> user: "don't mock the database here — mocked tests passed but the prod migration still broke last quarter"
+> → save `feedback`: integration tests hit a real DB, never mocks. **Why:** a mock/prod divergence masked a broken migration. **How to apply:** any test touching persistence.
+
+### `project` — non-derivable context about the work
+Ongoing work, decisions, deadlines, incidents that you cannot recover by reading code or `git log`. Convert relative dates to absolute (`Thursday` → `2026-07-24`). Same body structure (rule + **Why:** + **How to apply:**).
+> user: "we're freezing non-critical merges after Thursday, mobile is cutting a release"
+> → save `project`: merge freeze from 2026-07-24 for the mobile release cut. **Why:** release branch. **How to apply:** flag non-critical PRs after that date.
+
+### `reference` — where to look in external systems
+Pointers to issue trackers, dashboards, channels.
+> user: "pipeline bugs are tracked in the Linear project INGEST"
+> → save `reference`: pipeline bugs live in Linear project "INGEST".
+
+## What NOT to save (holds even if the user asks)
+
+- Code, architecture, conventions, file paths, project structure — **read the code**; it is authoritative.
+- Git history, recent changes, who-changed-what — **`git log` / `git blame`** are authoritative.
+- Debugging solutions / fix recipes — the fix is in the code; the commit message has the context.
+- Anything already in `AGENTS.md` / `CLAUDE.md`.
+- Ephemeral state: in-progress work, current-conversation context. Use a plan or todos for that, not memory.
+
+If the user asks you to "save this summary / PR list / activity log", do not dump it. Ask what was **surprising or non-obvious** — that is the only part worth keeping.
+
+## Hygiene
+
+- **Dedup:** before saving, scan the injected index — it shows both the project and global sections. If a memory already covers this, **update** it (same slug, same scope) instead of creating a near-duplicate. If the slug already exists in the *other* scope, `memory_save` rejects the write; update that existing memory rather than forking it across scopes.
+- **Body length:** a body under 20 characters is rejected. If that is all you have, you do not yet have a durable learning.
+- **Freshness:** if a memory turns out wrong or outdated, update or remove it. A memory naming a file/function is a claim from when it was written — verify before acting on it.
+- **Organize by topic**, not chronologically. One fact per file.
+- **Never** put a secret/credential in a memory — `memory_save` will reject it; save a non-secret pointer instead.
