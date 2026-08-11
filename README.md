@@ -91,9 +91,16 @@ bun run check
 
 `bun run typecheck` and individual repository-local unit files, such as `bun test test/config.test.ts`, require only Bun and the installed repository dependencies. The full `bun run check` also runs the production-stack smoke test, so it requires the `opencode` CLI on `PATH` and a working live stack with OMO, Claude auth, the memory plugin tuple, and the linked agent, command, and skill assets.
 
+## Memory recall
+
+`memory_recall` searches approved durable memories with local, request-time BM25F ranking. It searches `slug`, `description`, and `body`, including deterministic Korean character n-grams, but returns only `scope`, `slug`, `type`, `description`, and score metadata. It does not call a model, expose memory bodies, search transcripts, mutate memory, or add recall results to the system prompt.
+
+The tool requires a verified primary session. Its `scope` is `all`, `global`, or `project`; project-dependent requests fail when the project store is unavailable rather than falling back to global memory. Results come only from valid topic files referenced by the selected stores' bounded `MEMORY.md` indexes. Restart OpenCode after updating the plugin so the new tool registration is loaded.
+
 ## Automatic curation policy
 
 Automatic apply is limited to a locally proven `duplicate-exact` `MERGE`. Semantic similarity, stale-content judgments, and every other non-exact proposal are report-only. Curation never hard-deletes memory files. Before an applied change, recoverable originals are archived under `.trash/<runId>/` in the relevant memory store.
+For `duplicate-exact`, exact means equality of parsed `type`, `description`, and `body` after parser-defined surrounding-whitespace normalization, not byte identity; internal content differences remain unsafe, while raw SHA-256 hashes still fence stale or tampered sources.
 
 ## Architecture and dependency pin
 
