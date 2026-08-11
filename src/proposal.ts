@@ -114,8 +114,10 @@ function key(scope: MemoryScope, slug: string): string {
   return `${scope}:${slug}`
 }
 
-function sameContent(topic: SnapshotTopic, replacement: Replacement): boolean {
-  return topic.type === replacement.type && topic.description === replacement.description && topic.body === replacement.body
+type MemoryContent = Pick<SnapshotTopic, "type" | "description" | "body">
+
+function sameContent(left: MemoryContent, right: MemoryContent): boolean {
+  return left.type === right.type && left.description === right.description && left.body === right.body
 }
 
 function localSurvivor(sources: readonly SnapshotTopic[]): SnapshotTopic | undefined {
@@ -131,7 +133,7 @@ function validateExactDuplicate(operation: MutatingOperation, sources: readonly 
     return undefined
   }
   const destinationIsSource = operation.sources.some((source) => source.scope === operation.replacement.scope && source.slug === operation.replacement.slug)
-  if (!destinationIsSource || sources.some((topic) => !sameContent(first, { ...operation.replacement, scope: topic.scope, slug: topic.slug })) || !sameContent(first, operation.replacement)) {
+  if (!destinationIsSource || sources.some((topic) => !sameContent(first, topic)) || !sameContent(first, operation.replacement)) {
     errors.push(`${operation.id}: duplicate-exact must preserve type, exact description, exact body, and one source destination`)
   }
   return localSurvivor(sources)
