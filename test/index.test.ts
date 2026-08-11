@@ -66,6 +66,7 @@ describe("plugin module entrypoint", () => {
       "memory_curation_control",
       "memory_curation_run",
       "memory_curation_status",
+      "memory_recall",
       "memory_save",
     ])
     expect(hooks.event).toBeFunction()

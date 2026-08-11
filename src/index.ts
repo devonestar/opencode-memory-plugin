@@ -3,6 +3,7 @@ import { basename } from "node:path"
 import { initializeMemoryRoots, initializeProjectStoreRoot, resolveProjectMemoryDir } from "./config"
 import { parseCurationOptions } from "./curation-config"
 import { createCurationTools, createUnavailableCurationTools } from "./curation-tools"
+import { createMemoryRecallTool } from "./memory-recall"
 import { createOpenCodeCurationClient } from "./opencode-client"
 import { createCurationService } from "./orchestrator"
 import { createMemorySaveTool, createSessionClassifier, injectMemoryForSession, type ProjectStoreAccess } from "./runtime"
@@ -28,6 +29,7 @@ const memoryPlugin: Plugin = async ({ project, client, directory }, options) => 
   })
   const runtime = { globalStore, projectStore, classifySession }
   const memorySave = createMemorySaveTool(runtime)
+  const memoryRecall = createMemoryRecallTool(runtime)
   const curationSetup = projectStore.kind === "available"
     ? (() => {
         const service = createCurationService({
@@ -53,7 +55,7 @@ const memoryPlugin: Plugin = async ({ project, client, directory }, options) => 
     dispose: async () => {
       await curation?.dispose()
     },
-    tool: { memory_save: memorySave, ...curationSetup.tools },
+    tool: { memory_save: memorySave, memory_recall: memoryRecall, ...curationSetup.tools },
   }
 }
 
