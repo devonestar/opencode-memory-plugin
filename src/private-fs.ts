@@ -30,10 +30,14 @@ export type RegularFile = {
   readonly info: Stats
 }
 
+export type BoundedRegularFile = RegularFile & {
+  readonly truncated: boolean
+}
+
 async function withRegularFile<T>(path: string, work: (handle: RegularFileHandle, info: Stats) => Promise<T>): Promise<T> {
   let handle: RegularFileHandle
   try {
-    handle = await open(path, fsConstants.O_RDONLY | fsConstants.O_NOFOLLOW)
+    handle = await open(path, fsConstants.O_RDONLY | fsConstants.O_NOFOLLOW | fsConstants.O_NONBLOCK)
   } catch (error) {
     if (error instanceof Error && "code" in error && error.code === "ELOOP") throw new PrivatePathError(path, "symlink")
     throw error
@@ -45,6 +49,17 @@ async function withRegularFile<T>(path: string, work: (handle: RegularFileHandle
   } finally {
     await handle.close()
   }
+}
+
+async function readDescriptorRange(handle: RegularFileHandle, length: number, position: number): Promise<Buffer> {
+  const bytes = Buffer.allocUnsafe(length)
+  let offset = 0
+  while (offset < length) {
+    const result = await handle.read(bytes, offset, length - offset, position + offset)
+    if (result.bytesRead === 0) break
+    offset += result.bytesRead
+  }
+  return bytes.subarray(0, offset)
 }
 
 function currentUid(): number | undefined {
@@ -197,6 +212,21 @@ export async function readPrivate(trustedRoot: string, path: string): Promise<st
 
 export async function readRegularFile(path: string): Promise<RegularFile> {
   return withRegularFile(path, async (handle, info) => ({ bytes: await handle.readFile(), info }))
+}
+
+export async function readRegularFilePrefix(path: string, limit: number): Promise<RegularFile> {
+  return withRegularFile(path, async (handle, info) => ({ bytes: await readDescriptorRange(handle, limit + 1, 0), info }))
+}
+
+export async function readRegularFileTail(path: string, limit: number): Promise<BoundedRegularFile> {
+  return withRegularFile(path, async (handle, info) => {
+    const length = Math.min(info.size, limit)
+    return {
+      bytes: await readDescriptorRange(handle, length, info.size - length),
+      info,
+      truncated: info.size > limit,
+    }
+  })
 }
 
 export async function readPrivateBytes(trustedRoot: string, path: string): Promise<RegularFile> {
