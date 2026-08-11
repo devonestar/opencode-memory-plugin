@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test"
-import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises"
+import { mkdir, mkdtemp, open, readFile, readdir, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 import { parseMemory } from "../src/frontmatter"
@@ -102,5 +102,25 @@ describe("store.readIndexForInjection", () => {
     expect(retained[0]).toContain("](s204.md)")
     expect(retained.at(-1)).toContain("](s5.md)")
     expect(index.content).not.toContain("](s0.md)")
+  })
+
+  test("retains newest pointers from an index beyond the hard read cap", async () => {
+    // Given an oldest-to-newest sparse index beyond the runtime full-file buffer ceiling
+    const path = join(dir, "MEMORY.md")
+    const sparseBytes = 8 * 1024 * 1024 * 1024
+    const newest = "\n- [hard-4998](hard-4998.md) — description 4998\n- [hard-4999](hard-4999.md) — description 4999\n"
+    const handle = await open(path, "w")
+    await handle.write("- [hard-0](hard-0.md) — description 0\n", 0, "utf8")
+    await handle.truncate(sparseBytes)
+    await handle.write(newest, sparseBytes - Buffer.byteLength(newest), "utf8")
+    await handle.close()
+
+    // When the index is prepared for injection
+    const index = await createStore(dir).readIndexForInjection()
+
+    // Then truncation is reported and the newest tail pointers are retained
+    expect(index.truncated).toBe(true)
+    expect(index.content.split("\n")[0]).toContain("](hard-4999.md)")
+    expect(index.content).not.toContain("](hard-0.md)")
   })
 })

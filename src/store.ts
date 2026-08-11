@@ -3,7 +3,7 @@ import { join } from "node:path"
 import { INDEX_FILENAME, INDEX_HARD_CAP_BYTES, INDEX_MAX_BYTES, INDEX_MAX_LINES, INDEX_WARN_RATIO, MEMORY_DIR } from "./config"
 import { type MemoryType, isValidSlug, serializeMemory } from "./frontmatter"
 import { withLock } from "./fsutil"
-import { readRegularFile, writePrivate } from "./private-fs"
+import { readRegularFileTail, writePrivate } from "./private-fs"
 import { buildPointerLine, validateSaveInput } from "./gate"
 import type { InjectableIndex } from "./prompt"
 
@@ -112,9 +112,9 @@ type IndexSource = {
 
 async function readIndexSource(path: string): Promise<IndexSource> {
   try {
-    const { bytes } = await readRegularFile(path)
-    if (bytes.length <= INDEX_HARD_CAP_BYTES) return { content: bytes.toString("utf8"), truncated: false }
-    const tail = bytes.subarray(bytes.length - INDEX_HARD_CAP_BYTES).toString("utf8")
+    const { bytes, truncated } = await readRegularFileTail(path, INDEX_HARD_CAP_BYTES)
+    if (!truncated) return { content: bytes.toString("utf8"), truncated: false }
+    const tail = bytes.toString("utf8")
     const firstLineEnd = tail.indexOf("\n")
     return { content: firstLineEnd === -1 ? "" : tail.slice(firstLineEnd + 1), truncated: true }
   } catch (e) {
