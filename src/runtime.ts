@@ -14,12 +14,15 @@ type SessionRecord = {
 
 type SessionResolver = (sessionID: string) => Promise<SessionRecord | undefined>
 
-export type ProjectStoreAccess =
-  | { readonly kind: "available"; readonly store: MemoryStore }
+export type ScopeStoreAccess =
+  | { readonly kind: "ready"; readonly store: MemoryStore }
+  | { readonly kind: "blocked" }
   | { readonly kind: "unavailable"; readonly reason: string }
 
+export type ProjectStoreAccess = ScopeStoreAccess
+
 export type MemoryRuntime = {
-  readonly globalStore: MemoryStore
+  readonly globalStore: ScopeStoreAccess
   readonly projectStore: ProjectStoreAccess
   readonly classifySession: ClassifySession
 }
@@ -28,7 +31,7 @@ const EMPTY_INDEX = { content: "", truncated: false } as const
 
 type StoreSelection =
   | { readonly kind: "ready"; readonly target: MemoryStore; readonly other?: MemoryStore; readonly otherScope?: MemoryScope }
-  | { readonly kind: "rejected"; readonly reason: string }
+  | { readonly kind: "rejected"; readonly reason: "RECOVERY_BLOCKED" | "PROJECT_UNAVAILABLE" | "STORE_UNAVAILABLE" }
 
 function sizeNote(outcome: SaveOutcome): string {
   if (outcome.over) {
@@ -111,23 +114,30 @@ export async function injectMemoryForSession(runtime: MemoryRuntime, sessionID: 
   const classification = await runtime.classifySession(sessionID)
   // Unknown reads fail open: ~2KB of extra context is cheaper than silently disabling memory; confirmed children remain excluded.
   if (classification === "child") return
-  const global = await runtime.globalStore.readIndexForInjection().catch(() => null)
+  if (runtime.globalStore.kind !== "ready") return
+  const global = await runtime.globalStore.store.readIndexForInjection().catch(() => null)
   if (global === null) return
   const project =
-    runtime.projectStore.kind === "available" ? await runtime.projectStore.store.readIndexForInjection().catch(() => EMPTY_INDEX) : EMPTY_INDEX
+    runtime.projectStore.kind === "ready" ? await runtime.projectStore.store.readIndexForInjection().catch(() => EMPTY_INDEX) : EMPTY_INDEX
   injectInto(system, { project, global })
 }
 
 function selectStores(runtime: MemoryRuntime, scope: MemoryScope): StoreSelection {
   switch (scope) {
-    case "global":
-      return runtime.projectStore.kind === "available"
-        ? { kind: "ready", target: runtime.globalStore, other: runtime.projectStore.store, otherScope: "project" }
-        : { kind: "ready", target: runtime.globalStore }
-    case "project":
-      return runtime.projectStore.kind === "available"
-        ? { kind: "ready", target: runtime.projectStore.store, other: runtime.globalStore, otherScope: "global" }
-        : { kind: "rejected", reason: `project scope unavailable: ${runtime.projectStore.reason}; no global fallback was used` }
+    case "global": {
+      if (runtime.globalStore.kind === "blocked") return { kind: "rejected", reason: "RECOVERY_BLOCKED" }
+      if (runtime.globalStore.kind === "unavailable") return { kind: "rejected", reason: "STORE_UNAVAILABLE" }
+      return runtime.projectStore.kind === "ready"
+        ? { kind: "ready", target: runtime.globalStore.store, other: runtime.projectStore.store, otherScope: "project" }
+        : { kind: "ready", target: runtime.globalStore.store }
+    }
+    case "project": {
+      if (runtime.projectStore.kind === "blocked") return { kind: "rejected", reason: "RECOVERY_BLOCKED" }
+      if (runtime.projectStore.kind === "unavailable") return { kind: "rejected", reason: "PROJECT_UNAVAILABLE" }
+      return runtime.globalStore.kind === "ready"
+        ? { kind: "ready", target: runtime.projectStore.store, other: runtime.globalStore.store, otherScope: "global" }
+        : { kind: "ready", target: runtime.projectStore.store }
+    }
     default:
       return scope
   }
