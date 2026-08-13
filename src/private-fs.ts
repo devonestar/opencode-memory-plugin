@@ -103,7 +103,7 @@ export async function verifyTrustedDirectory(trusted: TrustedDirectory): Promise
   }
 }
 
-async function canonicalPath(trustedRoot: string, path: string): Promise<string> {
+export async function canonicalPath(trustedRoot: string, path: string): Promise<string> {
   const rootInfo = await lstat(trustedRoot)
   if (rootInfo.isSymbolicLink() || !rootInfo.isDirectory()) throw new PrivatePathError(trustedRoot, "trusted root is not a regular directory")
   await chmod(trustedRoot, 0o700)
