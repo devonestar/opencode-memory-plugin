@@ -1153,7 +1153,7 @@
         <article class="layer entry" data-wiring-stage="a">
           <div class="layer-kicker"><span>A · Git repository</span><span>editable source</span></div>
           <div class="node-list">
-            <div class="node critical"><strong>/Users/devvy/sandbox/opencode-memory-plugin/</strong><span>독립 저장소 루트 · 아키텍처와 배포 소스의 기준</span></div>
+            <div class="node critical"><strong>/absolute/path/to/opencode-memory-plugin/</strong><span>독립 저장소 루트 · 아키텍처와 배포 소스의 기준</span></div>
             <div class="node"><strong>src/index.ts</strong><span>OpenCode가 로드하는 단일 <code>default</code> 플러그인 엔트리</span></div>
             <div class="node"><strong>package.json + bun.lock</strong><span>저장소 로컬 의존성과 재현 가능한 잠금</span></div>
             <div class="node"><strong data-dependency="@opencode-ai/plugin" data-version="1.18.3">@opencode-ai/plugin 1.18.3</strong><span>플러그인 타입과 tool API</span></div>
@@ -1166,7 +1166,7 @@
           <div class="layer-kicker"><span>B · XDG global config</span><span>discovery links</span></div>
           <div class="node-list">
             <div class="node"><strong>${XDG_CONFIG_HOME:-$HOME/.config}/opencode</strong><span>기본값 <code>$HOME/.config/opencode</code> · OpenCode 전역 설정 루트</span></div>
-            <div class="node critical"><strong>live opencode.jsonc</strong><span>설정값 <code>/Users/devvy/sandbox/opencode-memory-plugin/src/index.ts</code>를 런타임에서 <code>file:///Users/devvy/sandbox/opencode-memory-plugin/src/index.ts</code>로 정규화합니다. 저장소를 옮기면 JSONC 경로도 바꿔야 합니다.</span></div>
+            <div class="node critical"><strong>live opencode.jsonc</strong><span>설정값 <code>/absolute/path/to/opencode-memory-plugin/src/index.ts</code>를 런타임에서 <code>file:///absolute/path/to/opencode-memory-plugin/src/index.ts</code>로 정규화합니다. 저장소를 옮기면 JSONC 경로도 바꿔야 합니다.</span></div>
           </div>
           <pre class="tree"><span class="root">seven absolute symlinks</span>
 $CONFIG_ROOT/agent/memory-curator.md → <span class="file" data-config-asset="agent">&lt;repo&gt;/opencode/agent/memory-curator.md</span>

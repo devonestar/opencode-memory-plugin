@@ -100,17 +100,17 @@ describe("architecture document structure", () => {
       ["@opencode-ai/plugin", "1.18.3"],
       ["@opencode-ai/sdk", "1.18.3"],
     ])
-    expect(wiring).toContain("/Users/devvy/sandbox/opencode-memory-plugin/src/index.ts")
+    expect(wiring).toContain("/absolute/path/to/opencode-memory-plugin/src/index.ts")
     expect(wiring).toContain("${XDG_CONFIG_HOME:-$HOME/.config}/opencode")
     expect(wiring).toContain("$HOME/.config/opencode")
-    expect(wiring).toContain("file:///Users/devvy/sandbox/opencode-memory-plugin/src/index.ts")
+    expect(wiring).toContain("file:///absolute/path/to/opencode-memory-plugin/src/index.ts")
     expect(wiring).toContain("${XDG_CONFIG_HOME:-$HOME/.config}/opencode/memory/")
     expect(wiring).toContain('data-boundary-role="repository-source"')
     expect(wiring).toContain('data-boundary-role="live-runtime-data"')
     expect(wiring.match(/data-flow-step="[1-4]"/g)).toHaveLength(4)
   })
 
-  test("omits mutable runtime snapshots", async () => {
+  test("omits mutable runtime snapshots and machine-local paths", async () => {
     // Given the complete architecture document
     const document = await readFile(DOCUMENT_PATH, "utf8")
 
@@ -118,10 +118,12 @@ describe("architecture document structure", () => {
     const fixedRuntimeVersion = /OpenCode\s+v?\d+\.\d+\.\d+/
     const numericTestBadge = /\d+\s+(?:tests?|테스트)\s+(?:passing|통과)/i
     const concreteLocalNamespace = /local-[a-z0-9-]+-[a-f0-9]{8,}/
+    const machineLocalHomePath = /\/(?:Users|home)\/[a-z0-9._-]+\//i
 
     // Then none are presented as permanent architecture
     expect(document).not.toMatch(fixedRuntimeVersion)
     expect(document).not.toMatch(numericTestBadge)
     expect(document).not.toMatch(concreteLocalNamespace)
+    expect(document).not.toMatch(machineLocalHomePath)
   })
 })
