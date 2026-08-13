@@ -31,8 +31,8 @@ function toolContext(sessionID: string): ToolContext {
 describe("memory_save scope", () => {
   test("requires an explicit scope in its argument schema", () => {
     const memorySave = createMemorySaveTool({
-      globalStore: createStore(join(dir, "global")),
-      projectStore: { kind: "available", store: createStore(join(dir, "project")) },
+      globalStore: { kind: "ready", store: createStore(join(dir, "global")) },
+      projectStore: { kind: "ready", store: createStore(join(dir, "project")) },
       classifySession: async () => "primary",
     })
     expect(memorySave.args.scope.safeParse(undefined).success).toBe(false)
@@ -42,8 +42,8 @@ describe("memory_save scope", () => {
     "rejects an unsafe description at the tool schema boundary: %p",
     (description) => {
       const memorySave = createMemorySaveTool({
-        globalStore: createStore(join(dir, "global")),
-        projectStore: { kind: "available", store: createStore(join(dir, "project")) },
+        globalStore: { kind: "ready", store: createStore(join(dir, "global")) },
+        projectStore: { kind: "ready", store: createStore(join(dir, "project")) },
         classifySession: async () => "primary",
       })
       expect(memorySave.args.description.safeParse(description).success).toBe(false)
@@ -54,7 +54,7 @@ describe("memory_save scope", () => {
     // Given a primary session whose project namespace could not be resolved
     const globalDir = join(dir, "global")
     const memorySave = createMemorySaveTool({
-      globalStore: createStore(globalDir),
+      globalStore: { kind: "ready", store: createStore(globalDir) },
       projectStore: { kind: "unavailable", reason: "worktree cannot be resolved" },
       classifySession: async () => "primary",
     })
@@ -76,8 +76,8 @@ describe("memory_save scope", () => {
     const projectStore = createStore(join(dir, "project"))
     await projectStore.save({ type: "project", slug: "shared-fact", description: "project-owned fact", body: "This existing durable fact belongs to project memory." })
     const memorySave = createMemorySaveTool({
-      globalStore: createStore(globalDir),
-      projectStore: { kind: "available", store: projectStore },
+      globalStore: { kind: "ready", store: createStore(globalDir) },
+      projectStore: { kind: "ready", store: projectStore },
       classifySession: async () => "primary",
     })
 
@@ -97,8 +97,8 @@ describe("memory_save scope", () => {
     const globalDir = join(dir, "global")
     const projectDir = join(dir, "project")
     const memorySave = createMemorySaveTool({
-      globalStore: createStore(globalDir),
-      projectStore: { kind: "available", store: createStore(projectDir) },
+      globalStore: { kind: "ready", store: createStore(globalDir) },
+      projectStore: { kind: "ready", store: createStore(projectDir) },
       classifySession: async () => "primary",
     })
 
@@ -129,7 +129,7 @@ describe("memory injection", () => {
     // When memory injection runs for a primary session
     await injectMemoryForSession(
       {
-        globalStore,
+        globalStore: { kind: "ready", store: globalStore },
         projectStore: { kind: "unavailable", reason: "worktree cannot be resolved" },
         classifySession: async () => "primary",
       },
@@ -155,8 +155,8 @@ describe("memory injection", () => {
     // When memory injection attempts to read both stores
     await injectMemoryForSession(
       {
-        globalStore,
-        projectStore: { kind: "available", store: createStore(join(dir, "project")) },
+        globalStore: { kind: "ready", store: globalStore },
+        projectStore: { kind: "ready", store: createStore(join(dir, "project")) },
         classifySession: async () => "primary",
       },
       "primary",
@@ -174,8 +174,8 @@ describe("memory injection", () => {
     // When memory injection runs
     await injectMemoryForSession(
       {
-        globalStore: createStore(join(dir, "global")),
-        projectStore: { kind: "available", store: createStore(join(dir, "project")) },
+        globalStore: { kind: "ready", store: createStore(join(dir, "global")) },
+        projectStore: { kind: "ready", store: createStore(join(dir, "project")) },
         classifySession: async () => "unknown",
       },
       undefined,
@@ -210,8 +210,8 @@ describe("session suppression", () => {
   test("a child session receives no injection and cannot save", async () => {
     // Given a runtime that resolves the active session as a child
     const runtime = {
-      globalStore: createStore(join(dir, "global")),
-      projectStore: { kind: "available", store: createStore(join(dir, "project")) } as const,
+      globalStore: { kind: "ready", store: createStore(join(dir, "global")) } as const,
+      projectStore: { kind: "ready", store: createStore(join(dir, "project")) } as const,
       classifySession: async () => "child" as const,
     }
     const system: string[] = []
@@ -231,8 +231,8 @@ describe("session suppression", () => {
   test("an unknown session cannot save", async () => {
     // Given a runtime that cannot verify the session as primary
     const runtime = {
-      globalStore: createStore(join(dir, "global")),
-      projectStore: { kind: "available", store: createStore(join(dir, "project")) } as const,
+      globalStore: { kind: "ready", store: createStore(join(dir, "global")) } as const,
+      projectStore: { kind: "ready", store: createStore(join(dir, "project")) } as const,
       classifySession: async () => "unknown" as const,
     }
 

@@ -2,22 +2,30 @@ import type { Plugin } from "@opencode-ai/plugin"
 import { basename } from "node:path"
 import { initializeMemoryRoots, initializeProjectStoreRoot, resolveProjectMemoryDir } from "./config"
 import { parseCurationOptions } from "./curation-config"
-import { createCurationTools, createUnavailableCurationTools } from "./curation-tools"
+import { createCurationRuntime } from "./curation-runtime"
+import { createLifecycleTools, type LifecycleToolRuntime } from "./lifecycle-tools"
+import { recoverLifecycleStore } from "./lifecycle-recovery"
+import { createLifecycleService } from "./lifecycle-service"
 import { createMemoryRecallTool } from "./memory-recall"
+import { createMemoryRecallArchiveTool } from "./memory-recall-archive"
 import { createOpenCodeCurationClient } from "./opencode-client"
 import { createCurationService } from "./orchestrator"
-import { createMemorySaveTool, createSessionClassifier, injectMemoryForSession, type ProjectStoreAccess } from "./runtime"
+import { createMemorySaveTool, createSessionClassifier, injectMemoryForSession, type ScopeStoreAccess } from "./runtime"
 import { createStore } from "./store"
 
 const memoryPlugin: Plugin = async ({ project, client, directory }, options) => {
   const curationConfig = parseCurationOptions(options)
   await initializeMemoryRoots()
-  const globalStore = createStore()
-  let projectStore: ProjectStoreAccess
+  const globalRawStore = createStore()
+  const globalRecovery = await recoverLifecycleStore({ storeRoot: globalRawStore.dir, scope: "global" })
+  const globalStore: ScopeStoreAccess = globalRecovery.ok ? { kind: "ready", store: globalRawStore } : { kind: "blocked" }
+  let projectStore: ScopeStoreAccess
   try {
     const projectDir = await resolveProjectMemoryDir(project, directory)
     await initializeProjectStoreRoot(projectDir)
-    projectStore = { kind: "available", store: createStore(projectDir) }
+    const store = createStore(projectDir)
+    const recovery = await recoverLifecycleStore({ storeRoot: store.dir, scope: "project" })
+    projectStore = recovery.ok ? { kind: "ready", store } : { kind: "blocked" }
   } catch (error) {
     const reason = error instanceof Error ? error.message : "unknown namespace resolution failure"
     projectStore = { kind: "unavailable", reason }
@@ -30,32 +38,38 @@ const memoryPlugin: Plugin = async ({ project, client, directory }, options) => 
   const runtime = { globalStore, projectStore, classifySession }
   const memorySave = createMemorySaveTool(runtime)
   const memoryRecall = createMemoryRecallTool(runtime)
-  const curationSetup = projectStore.kind === "available"
-    ? (() => {
-        const service = createCurationService({
+  const globalLifecycle: LifecycleToolRuntime["global"] = globalStore.kind === "ready"
+    ? { kind: "ready", storeRoot: globalStore.store.dir, service: createLifecycleService({ storeRoot: globalStore.store.dir, scope: "global" }) }
+    : globalStore.kind === "blocked" ? { kind: "blocked" } : { kind: "unavailable" }
+  const projectLifecycle: LifecycleToolRuntime["project"] = projectStore.kind === "ready"
+    ? { kind: "ready", storeRoot: projectStore.store.dir, service: createLifecycleService({ storeRoot: projectStore.store.dir, scope: "project" }) }
+    : projectStore.kind === "blocked" ? { kind: "blocked" } : { kind: "unavailable" }
+  const lifecycleRuntime = { classifySession, global: globalLifecycle, project: projectLifecycle }
+  const lifecycleTools = createLifecycleTools(lifecycleRuntime)
+  const memoryRecallArchive = createMemoryRecallArchiveTool(lifecycleRuntime)
+  const curationSetup = createCurationRuntime({
+    global: globalStore,
+    project: projectStore,
+    createService: (stores) => createCurationService({
           client: createOpenCodeCurationClient(client, directory),
-          stores: { global: globalStore.dir, project: projectStore.store.dir },
-          globalDir: globalStore.dir,
-          namespace: basename(projectStore.store.dir),
+          stores,
+          globalDir: stores.global,
+          namespace: basename(stores.project),
           directory,
           config: curationConfig,
-        })
-        return { service, tools: createCurationTools(service) }
-      })()
-    : { service: undefined, tools: createUnavailableCurationTools() }
+        }),
+  })
   const curation = curationSetup.service
 
   return {
     "experimental.chat.system.transform": async (input, output) => {
       await injectMemoryForSession(runtime, input.sessionID, output.system)
     },
-    event: async ({ event }) => {
-      await curation?.handleEvent(event)
-    },
-    dispose: async () => {
-      await curation?.dispose()
-    },
-    tool: { memory_save: memorySave, memory_recall: memoryRecall, ...curationSetup.tools },
+    ...(curation === undefined ? {} : {
+      event: async ({ event }) => { await curation.handleEvent(event) },
+      dispose: async () => { await curation.dispose() },
+    }),
+    tool: { memory_save: memorySave, memory_recall: memoryRecall, memory_recall_archive: memoryRecallArchive, ...lifecycleTools, ...curationSetup.tools },
   }
 }
 

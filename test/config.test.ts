@@ -114,16 +114,22 @@ describe("project memory namespace", () => {
 
     await initializeMemoryRoots(memoryDir, projectsDir)
 
-    const [memoryStat, projectsStat, curationStat, trashStat] = await Promise.all([
+    const [memoryStat, projectsStat, curationStat, trashStat, archiveStat, userTrashStat, transactionsStat] = await Promise.all([
       stat(memoryDir),
       stat(projectsDir),
       stat(join(memoryDir, ".curation")),
       stat(join(memoryDir, ".trash")),
+      stat(join(memoryDir, ".archive", "entries")),
+      stat(join(memoryDir, ".user-trash", "entries")),
+      stat(join(memoryDir, ".memory-lifecycle", "transactions")),
     ])
     expect(memoryStat.mode & 0o777).toBe(0o700)
     expect(projectsStat.mode & 0o777).toBe(0o700)
     expect(curationStat.mode & 0o777).toBe(0o700)
     expect(trashStat.mode & 0o777).toBe(0o700)
+    expect(archiveStat.mode & 0o777).toBe(0o700)
+    expect(userTrashStat.mode & 0o777).toBe(0o700)
+    expect(transactionsStat.mode & 0o777).toBe(0o700)
   })
 
   test("initializes a private project store trash root with owner-only permissions", async () => {
@@ -133,7 +139,15 @@ describe("project memory namespace", () => {
 
     await initializeProjectStoreRoot(projectDir)
 
-    const trashStat = await stat(join(projectDir, ".trash"))
+    const [trashStat, archiveStat, userTrashStat, transactionsStat] = await Promise.all([
+      stat(join(projectDir, ".trash")),
+      stat(join(projectDir, ".archive", "entries")),
+      stat(join(projectDir, ".user-trash", "entries")),
+      stat(join(projectDir, ".memory-lifecycle", "transactions")),
+    ])
     expect(trashStat.mode & 0o777).toBe(0o700)
+    expect(archiveStat.mode & 0o777).toBe(0o700)
+    expect(userTrashStat.mode & 0o777).toBe(0o700)
+    expect(transactionsStat.mode & 0o777).toBe(0o700)
   })
 })

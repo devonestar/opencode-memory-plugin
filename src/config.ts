@@ -22,10 +22,18 @@ export async function initializeMemoryRoots(memoryDir: string = MEMORY_DIR, proj
   await ensurePrivateDir(memoryDir, projectsDir)
   await ensurePrivateDir(memoryDir, join(memoryDir, ".curation"))
   await ensurePrivateDir(memoryDir, join(memoryDir, ".trash"))
+  await initializeLifecycleRoots(memoryDir)
 }
 
 export async function initializeProjectStoreRoot(projectStoreDir: string): Promise<void> {
   await ensurePrivateDir(projectStoreDir, join(projectStoreDir, ".trash"))
+  await initializeLifecycleRoots(projectStoreDir)
+}
+
+async function initializeLifecycleRoots(storeRoot: string): Promise<void> {
+  await ensurePrivateDir(storeRoot, join(storeRoot, ".archive", "entries"))
+  await ensurePrivateDir(storeRoot, join(storeRoot, ".user-trash", "entries"))
+  await ensurePrivateDir(storeRoot, join(storeRoot, ".memory-lifecycle", "transactions"))
 }
 
 export type ProjectIdentity = {

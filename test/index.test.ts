@@ -54,23 +54,27 @@ describe("plugin module entrypoint", () => {
     expect(system.filter((entry) => entry.split("\n", 1)[0] === MEMORY_BLOCK_SENTINEL).length).toBe(1)
   })
 
-  test("registers curation lifecycle hooks and all operational tools", async () => {
+  test("registers all tools without curation hooks when the project scope is unavailable", async () => {
     // Given a realistic factory invocation without tuple options
     const hooks = await memoryPlugin(PLUGIN_INPUT)
 
     // When the returned hooks are inspected
     const tools = hooks.tool ?? {}
 
-    // Then existing save behavior and the complete curation surface coexist
+    // Then unavailable curation tools remain discoverable without an unusable event service
     expect(Object.keys(tools).sort()).toEqual([
+      "memory_archive",
       "memory_curation_control",
       "memory_curation_run",
       "memory_curation_status",
+      "memory_delete",
       "memory_recall",
+      "memory_recall_archive",
+      "memory_restore",
       "memory_save",
     ])
-    expect(hooks.event).toBeFunction()
-    expect(hooks.dispose).toBeFunction()
+    expect(hooks.event).toBeUndefined()
+    expect(hooks.dispose).toBeUndefined()
   })
 
   test("rejects unknown tuple curation options at plugin initialization", async () => {
