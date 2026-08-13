@@ -15,6 +15,7 @@ const OUTPUT_MAX_BYTES = 25_000
 type RecallErrorCode =
   | "SESSION_NOT_VERIFIED"
   | "PROJECT_UNAVAILABLE"
+  | "RECOVERY_BLOCKED"
   | "CORPUS_LIMIT_EXCEEDED"
   | "STORE_UNAVAILABLE"
 
@@ -52,15 +53,15 @@ export function createMemoryRecallTool(runtime: MemoryRuntime) {
       const sources: readonly RecallSource[] | null = (() => {
         switch (args.scope) {
           case "global":
-            return [{ scope: "global", store: runtime.globalStore }]
+            return runtime.globalStore.kind === "ready" ? [{ scope: "global", store: runtime.globalStore.store }] : null
           case "project":
-            return runtime.projectStore.kind === "available"
+            return runtime.projectStore.kind === "ready"
               ? [{ scope: "project", store: runtime.projectStore.store }]
               : null
           case "all":
-            return runtime.projectStore.kind === "available"
+            return runtime.globalStore.kind === "ready" && runtime.projectStore.kind === "ready"
               ? [
-                  { scope: "global", store: runtime.globalStore },
+                  { scope: "global", store: runtime.globalStore.store },
                   { scope: "project", store: runtime.projectStore.store },
                 ]
               : null
@@ -70,7 +71,12 @@ export function createMemoryRecallTool(runtime: MemoryRuntime) {
           }
         }
       })()
-      if (sources === null) return failure("PROJECT_UNAVAILABLE")
+      if (sources === null) {
+        const blocked = (args.scope === "global" || args.scope === "all") && runtime.globalStore.kind === "blocked"
+          || (args.scope === "project" || args.scope === "all") && runtime.projectStore.kind === "blocked"
+        if (blocked) return failure("RECOVERY_BLOCKED")
+        return failure((args.scope === "global" || args.scope === "all") && runtime.globalStore.kind === "unavailable" ? "STORE_UNAVAILABLE" : "PROJECT_UNAVAILABLE")
+      }
 
       let documents: Awaited<ReturnType<typeof loadRecallCorpus>>
       try {
