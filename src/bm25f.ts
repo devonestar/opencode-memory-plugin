@@ -10,7 +10,7 @@ export type RecallDocument = {
   readonly body: string
 }
 
-export type RankedRecallDocument = RecallDocument & {
+export type RankedRecallDocument<T extends RecallDocument = RecallDocument> = T & {
   readonly score: number
 }
 
@@ -31,8 +31,8 @@ type TokenizedDocument = {
   readonly source: RecallDocument
   readonly fields: Readonly<Record<SearchField, FieldStatistics>>
 }
-type ScoredDocument = {
-  readonly document: RecallDocument
+type ScoredDocument<T extends RecallDocument> = {
+  readonly document: T
   readonly rawScore: number
 }
 
@@ -61,17 +61,17 @@ function compareCodePointStrings(left: string, right: string): number {
   return leftPoints.length - rightPoints.length
 }
 
-function compareScoredDocuments(left: ScoredDocument, right: ScoredDocument): number {
+function compareScoredDocuments<T extends RecallDocument>(left: ScoredDocument<T>, right: ScoredDocument<T>): number {
   if (left.rawScore !== right.rawScore) return right.rawScore - left.rawScore
   if (left.document.scope !== right.document.scope) return left.document.scope === "global" ? -1 : 1
   return compareCodePointStrings(left.document.slug, right.document.slug)
 }
 
-export function rankBm25f(query: string, documents: readonly RecallDocument[]): readonly RankedRecallDocument[] {
+export function rankBm25f<T extends RecallDocument>(query: string, documents: readonly T[]): readonly RankedRecallDocument<T>[] {
   const terms = tokenizeQuery(query)
   if (terms.length === 0 || documents.length === 0) return []
 
-  const corpus: readonly TokenizedDocument[] = documents.map((source) => ({
+  const corpus: readonly (TokenizedDocument & { readonly source: T })[] = documents.map((source) => ({
     source,
     fields: {
       slug: fieldStatistics(source.slug),
@@ -94,7 +94,7 @@ export function rankBm25f(query: string, documents: readonly RecallDocument[]): 
     documentFrequencies.set(term, frequency)
   }
 
-  const scored: ScoredDocument[] = []
+  const scored: ScoredDocument<T>[] = []
   for (const document of corpus) {
     let rawScore = 0
     for (const [term, documentFrequency] of documentFrequencies) {

@@ -56,8 +56,8 @@ function runtime(input: {
   readonly globalStore?: MemoryStore
 }): MemoryRuntime {
   return {
-    globalStore: input.globalStore ?? trackedStore("global", input.counts),
-    projectStore: input.projectStore ?? { kind: "available", store: trackedStore("project", input.counts) },
+    globalStore: { kind: "ready", store: input.globalStore ?? trackedStore("global", input.counts) },
+    projectStore: input.projectStore ?? { kind: "ready", store: trackedStore("project", input.counts) },
     classifySession: async () => input.classification,
   }
 }
@@ -135,7 +135,7 @@ describe("memory_recall", () => {
     const counts = { global: 0, project: 0 }
     const projectStore: ProjectStoreAccess = scope === "global"
       ? { kind: "unavailable", reason: "/private/project/reason" }
-      : { kind: "available", store: trackedStore("project", counts) }
+      : { kind: "ready", store: trackedStore("project", counts) }
     const definition = createMemoryRecallTool(runtime({ classification: "primary", counts, projectStore }))
 
     // When the selected scope is recalled
