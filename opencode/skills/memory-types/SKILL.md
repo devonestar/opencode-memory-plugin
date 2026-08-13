@@ -78,3 +78,10 @@ If the user asks you to "save this summary / PR list / activity log", do not dum
 - **Freshness:** if a memory turns out wrong or outdated, update or remove it. A memory naming a file/function is a claim from when it was written — verify before acting on it.
 - **Organize by topic**, not chronologically. One fact per file.
 - **Never** put a secret/credential in a memory — `memory_save` will reject it; save a non-secret pointer instead.
+
+## Lifecycle hygiene
+
+- Use `memory_delete` when the user explicitly asks to delete an active memory. Their request is sufficient authorization; do not ask for a second confirmation.
+- Use `memory_archive` only when the user explicitly asks to archive an active memory that has low current value but may still matter as historical context. The request is sufficient authorization; do not ask for a second confirmation. Do not treat semantic similarity or a curator suggestion as authority to archive automatically.
+- Use `memory_restore` only when the user explicitly asks to restore a memory, with the exact `entry_id` from the archive or delete receipt, plus the same explicit scope and matching source. Their request is sufficient authorization; do not ask for a second confirmation. It fails rather than overwriting an active memory with the same slug.
+- Use `memory_recall_archive` only when the user explicitly asks to search archived memory. `archived_at` is the time the archive entry was created. Normal recall does not search archives, and trash is never searchable.
