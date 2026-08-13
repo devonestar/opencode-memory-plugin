@@ -1,5 +1,7 @@
 # OpenCode Memory Plugin
 
+[English](README.md) | [한국어](README.ko.md)
+
 This private OpenCode plugin injects durable memory into sessions, exposes memory save, recall, and lifecycle tools, keeps global and project memories separate, and provides bounded curation workflows. The plugin entry point is `src/index.ts`; it intentionally exports only a default plugin factory because OpenCode invokes every exported function as a plugin.
 
 ## Memory data and scopes
