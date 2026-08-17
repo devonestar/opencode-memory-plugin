@@ -42,6 +42,28 @@
 ]
 ```
 
+튜플에는 시스템 프롬프트 메모리 블록 예산을 조정하는 선택적 `injection` 그룹을 추가할 수 있다. 그룹 전체, 개별 키, 튜플 자체를 생략하면 기존 하드코딩 예산이 그대로 유지되므로 기존 설치에는 영향이 없다.
+
+```jsonc
+{
+  "injection": {
+    "maxBlockBytes": 10000,
+    "pointerBudgetBytes": 8000,
+    "pointerMaxLines": 80,
+    "projectShare": 0.6
+  }
+}
+```
+
+| 키 | 기본값 | 범위 | 의미 |
+| --- | --- | --- | --- |
+| `maxBlockBytes` | 10000 | 2048~100000 | 주입되는 메모리 블록 전체의 UTF-8 byte 상한. 블록이 이 상한에 맞을 때까지 포인터를 제거한다 |
+| `pointerBudgetBytes` | 8000 | 512~100000 | 블록 단위 정리 전에 적용되는 index 포인터 줄의 초기 byte 예산 |
+| `pointerMaxLines` | 80 | 1~1000 | 두 scope를 합친 index 포인터 줄 수의 최대값 |
+| `projectShare` | 0.6 | 0.05~0.95 | 포인터 예산 중 프로젝트 포인터에 예약되는 비율. 나머지는 전역 몫이며, 남는 용량은 상대 scope로 이월된다 |
+
+`injection` 안의 알 수 없는 키와 `curation`/`injection` 밖의 알 수 없는 최상위 그룹은 조용히 무시되지 않고 plugin 로드 시점에 거부된다.
+
 OpenCode는 시작할 때 설정, plugin, agent, command, skill을 불러온다. 이 저장소나 연결된 설정 자산을 변경한 뒤에는 OpenCode를 종료하고 다시 시작한다.
 
 ## 설정 자산

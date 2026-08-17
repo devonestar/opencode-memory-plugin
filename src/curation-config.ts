@@ -51,7 +51,8 @@ const curationSchema = z
   })
   .strict()
 
-const optionsSchema = z.object({ curation: curationSchema.optional() }).strict()
+/** `injection` is validated by parseInjectionOptions; it is tolerated here so both parsers accept the same tuple. */
+const optionsSchema = z.object({ curation: curationSchema.optional(), injection: z.unknown().optional() }).strict()
 
 export class CurationConfigError extends Error {
   readonly name = "CurationConfigError"
