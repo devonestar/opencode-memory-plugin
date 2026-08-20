@@ -5,9 +5,16 @@ import { POINTER_MAX_CHARS } from "../src/config"
 import { resolveOpenCodeConfigRoot } from "./config-root"
 
 describe("primary-session command contract", () => {
-  // `agent:` frontmatter makes OpenCode run the command in a child session, and verifyRoot in
-  // src/orchestrator.ts rejects any session carrying a parentID, so these can never be accepted.
-  for (const file of ["memory-curation-run.md", "memory-curation-pause.md", "memory-curation-resume.md"]) {
+  // `agent:` frontmatter makes OpenCode run the command in a child session. The curation mutations
+  // can never be accepted there because verifyRoot in src/orchestrator.ts rejects any session
+  // carrying a parentID. memory-review breaks there for an independent reason: its procedure has to
+  // present proposals to the user and wait for approval, which a child session cannot do.
+  for (const file of [
+    "memory-curation-run.md",
+    "memory-curation-pause.md",
+    "memory-curation-resume.md",
+    "memory-review.md",
+  ]) {
     test(`${file} does not pin a subagent`, async () => {
       const command = await readFile(join(resolveOpenCodeConfigRoot(), "command", file), "utf8")
 

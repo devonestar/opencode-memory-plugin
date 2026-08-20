@@ -1,6 +1,5 @@
 ---
 description: Audit accumulated memories with a subagent and propose merges, rewrites, and deletions — review only, never writes
-agent: build
 ---
 
 # /memory-review — batch memory audit
