@@ -78,6 +78,8 @@ OpenCode는 시작할 때 설정, plugin, agent, command, skill을 불러온다.
 - `opencode/command/memory-curation-resume.md`
 - `opencode/skills/memory-types/SKILL.md`
 
+`memory-curation-run.md`, `memory-curation-pause.md`, `memory-curation-resume.md`, `memory-review.md`는 frontmatter에 `agent`를 지정하지 않는다. `agent` 값이 있으면 OpenCode가 해당 command를 하위 session에서 실행하기 때문이다. curation 변경 command 3개는 검증된 primary session을 요구하므로 하위 session에서는 AUTH-1이 거부한다. `memory-review.md`는 제안을 사용자에게 제시하고 승인을 기다려야 하므로 하위 session에서는 절차가 성립하지 않는다.
+
 `${XDG_CONFIG_HOME:-~/.config}/opencode/{agent,command,skills}/` 아래의 표준 탐색 경로에는 이 저장소를 가리키는 절대 symlink 7개가 있다. 숨겨진 백업 디렉터리에 과거 스냅샷이 남아 있을 수 있지만, 이 스냅샷은 활성 원본이 아니다. 이를 편집하거나 복사본 트리를 별도로 관리해서는 안 된다.
 
 저장소를 이동한 경우 다음 절차를 따른다.
