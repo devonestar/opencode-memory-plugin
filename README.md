@@ -78,8 +78,6 @@ The files under `opencode/` are the single ACTIVE editable copies of the memory-
 - `opencode/command/memory-curation-resume.md`
 - `opencode/skills/memory-types/SKILL.md`
 
-`memory-curation-run.md`, `memory-curation-pause.md`, and `memory-curation-resume.md` pin no `agent` in their frontmatter. Their tools require a verified primary session, and an `agent` value makes OpenCode execute the command in a child session, which AUTH-1 rejects.
-
 Their standard discovery locations under `${XDG_CONFIG_HOME:-~/.config}/opencode/{agent,command,skills}/` contain seven absolute symlinks into this repository. Hidden backup directories may retain historical snapshots, but those snapshots are not active sources. Do not edit them or maintain a copied second tree.
 
 If the repository moves:
