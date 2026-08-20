@@ -58,6 +58,58 @@ describe("buildSystemBlock", () => {
   })
 })
 
+describe("buildSystemBlock with configured budgets", () => {
+  const oversized = indexes(
+    Array.from({ length: 200 }, (_, index) => `- [p-${index}](p-${index}.md) — ${"p".repeat(90)}`).join("\n"),
+    Array.from({ length: 200 }, (_, index) => `- [g-${index}](g-${index}.md) — ${"g".repeat(90)}`).join("\n"),
+  )
+
+  test("defaults reproduce the historical block byte for byte", () => {
+    // Given the default configuration passed explicitly
+    const explicit = buildSystemBlock(oversized, { maxBlockBytes: 10_000, pointerBudgetBytes: 8_000, pointerMaxLines: 80, projectShare: 0.6 })
+
+    // Then it matches the config-free call exactly
+    expect(explicit).toBe(buildSystemBlock(oversized))
+  })
+
+  test("a smaller block cap bounds the rendered block", () => {
+    // Given a halved block budget
+    const config = { maxBlockBytes: 5_000, pointerBudgetBytes: 8_000, pointerMaxLines: 80, projectShare: 0.6 }
+
+    // When the combined block is rendered
+    const block = buildSystemBlock(oversized, config)
+
+    // Then bytes are bounded by the configured cap, below the default
+    expect(Buffer.byteLength(block, "utf8")).toBeLessThanOrEqual(5_000)
+  })
+
+  test("a smaller line budget bounds retained pointers", () => {
+    // Given a pointer line budget of 10
+    const config = { maxBlockBytes: 10_000, pointerBudgetBytes: 8_000, pointerMaxLines: 10, projectShare: 0.6 }
+
+    // When the combined block is rendered
+    const block = buildSystemBlock(oversized, config)
+    const pointerCount = block.split("\n").filter((line) => line.startsWith("- [")).length
+
+    // Then at most 10 pointers survive
+    expect(pointerCount).toBeLessThanOrEqual(10)
+    expect(pointerCount).toBeGreaterThan(0)
+  })
+
+  test("a custom project share shifts the initial split", () => {
+    // Given a project-heavy 90/10 share
+    const config = { maxBlockBytes: 10_000, pointerBudgetBytes: 8_000, pointerMaxLines: 80, projectShare: 0.9 }
+
+    // When the combined block is rendered
+    const block = buildSystemBlock(oversized, config)
+    const projectCount = block.split("\n").filter((line) => line.startsWith("- [p-")).length
+    const globalCount = block.split("\n").filter((line) => line.startsWith("- [g-")).length
+
+    // Then retained pointer capacity follows the requested split
+    expect(projectCount / (projectCount + globalCount)).toBeGreaterThanOrEqual(0.85)
+  })
+})
+
 describe("injectInto", () => {
   test("appends one combined block without changing existing entries", () => {
     const system: string[] = ["base prompt"]

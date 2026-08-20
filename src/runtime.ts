@@ -2,6 +2,7 @@ import { tool } from "@opencode-ai/plugin"
 import { INDEX_MAX_BYTES, INDEX_TARGET_RATIO } from "./config"
 import { MEMORY_TYPES } from "./frontmatter"
 import { isSafeDescription, MEMORY_SCOPES, type MemoryScope, SaveGateError, validateSaveInput } from "./gate"
+import { DEFAULT_INJECTION_CONFIG, type InjectionConfig } from "./injection-config"
 import { injectInto } from "./prompt"
 import { PathContainmentError, type MemoryStore, type SaveOutcome } from "./store"
 
@@ -110,7 +111,12 @@ export function createMemorySaveTool(runtime: MemoryRuntime) {
   })
 }
 
-export async function injectMemoryForSession(runtime: MemoryRuntime, sessionID: string | undefined, system: string[]): Promise<void> {
+export async function injectMemoryForSession(
+  runtime: MemoryRuntime,
+  sessionID: string | undefined,
+  system: string[],
+  config: InjectionConfig = DEFAULT_INJECTION_CONFIG,
+): Promise<void> {
   const classification = await runtime.classifySession(sessionID)
   // Unknown reads fail open: ~2KB of extra context is cheaper than silently disabling memory; confirmed children remain excluded.
   if (classification === "child") return
@@ -119,7 +125,7 @@ export async function injectMemoryForSession(runtime: MemoryRuntime, sessionID: 
   if (global === null) return
   const project =
     runtime.projectStore.kind === "ready" ? await runtime.projectStore.store.readIndexForInjection().catch(() => EMPTY_INDEX) : EMPTY_INDEX
-  injectInto(system, { project, global })
+  injectInto(system, { project, global }, config)
 }
 
 function selectStores(runtime: MemoryRuntime, scope: MemoryScope): StoreSelection {

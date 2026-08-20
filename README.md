@@ -42,6 +42,28 @@ The global config at `${XDG_CONFIG_HOME:-~/.config}/opencode/opencode.jsonc` loa
 ]
 ```
 
+The tuple may also carry an optional `injection` group that tunes the system-prompt memory block budgets. Omitting the group, any key, or the whole tuple keeps the historical hard-coded budgets, so existing installations are unaffected:
+
+```jsonc
+{
+  "injection": {
+    "maxBlockBytes": 10000,
+    "pointerBudgetBytes": 8000,
+    "pointerMaxLines": 80,
+    "projectShare": 0.6
+  }
+}
+```
+
+| Key | Default | Range | Meaning |
+| --- | --- | --- | --- |
+| `maxBlockBytes` | 10000 | 2048–100000 | UTF-8 byte cap for the whole injected memory block; pointers are dropped newest-last until the block fits |
+| `pointerBudgetBytes` | 8000 | 512–100000 | Initial byte budget for index pointer lines before block-level trimming |
+| `pointerMaxLines` | 80 | 1–1000 | Maximum number of index pointer lines across both scopes |
+| `projectShare` | 0.6 | 0.05–0.95 | Fraction of the pointer budget reserved for project pointers; the remainder goes to global, and unused capacity spills over |
+
+Unknown keys inside `injection`, and unknown top-level groups next to `curation`/`injection`, are rejected at plugin load rather than silently ignored.
+
 OpenCode loads configuration, plugins, agents, commands, and skills at startup. Quit and restart OpenCode after changing this repository or any linked config asset.
 
 ## Config assets

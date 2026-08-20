@@ -1,7 +1,9 @@
+import { DEFAULT_INJECTION_CONFIG, type InjectionConfig } from "./injection-config"
+
 export const MEMORY_BLOCK_SENTINEL = "<!-- opencode-memory:v2 -->"
-export const MEMORY_BLOCK_MAX_BYTES = 10_000
-export const POINTER_BUDGET_BYTES = 8_000
-export const POINTER_MAX_LINES = 80
+export const MEMORY_BLOCK_MAX_BYTES = DEFAULT_INJECTION_CONFIG.maxBlockBytes
+export const POINTER_BUDGET_BYTES = DEFAULT_INJECTION_CONFIG.pointerBudgetBytes
+export const POINTER_MAX_LINES = DEFAULT_INJECTION_CONFIG.pointerMaxLines
 
 export type InjectableIndex = {
   readonly content: string
@@ -13,11 +15,23 @@ export type MemoryIndexes = {
   readonly global: InjectableIndex
 }
 
-const PROJECT_SHARE = 0.6
-const PROJECT_LINE_SHARE = Math.floor(POINTER_MAX_LINES * PROJECT_SHARE)
-const PROJECT_BYTE_SHARE = Math.floor(POINTER_BUDGET_BYTES * PROJECT_SHARE)
-const GLOBAL_LINE_SHARE = POINTER_MAX_LINES - PROJECT_LINE_SHARE
-const GLOBAL_BYTE_SHARE = POINTER_BUDGET_BYTES - PROJECT_BYTE_SHARE
+type BudgetSplit = {
+  readonly projectBytes: number
+  readonly projectLines: number
+  readonly globalBytes: number
+  readonly globalLines: number
+}
+
+function splitBudget(config: InjectionConfig): BudgetSplit {
+  const projectLines = Math.floor(config.pointerMaxLines * config.projectShare)
+  const projectBytes = Math.floor(config.pointerBudgetBytes * config.projectShare)
+  return {
+    projectBytes,
+    projectLines,
+    globalBytes: config.pointerBudgetBytes - projectBytes,
+    globalLines: config.pointerMaxLines - projectLines,
+  }
+}
 
 const TERSE_POLICY = [
   "You have persistent, file-based global and project memory stores for learnings that outlive this conversation.",
@@ -48,27 +62,28 @@ type SelectionInput = {
   readonly global: readonly string[]
 }
 
-export function buildSystemBlock(indexes: MemoryIndexes): string {
+export function buildSystemBlock(indexes: MemoryIndexes, config: InjectionConfig = DEFAULT_INJECTION_CONFIG): string {
+  const split = splitBudget(config)
   const projectLines = pointerLines(indexes.project)
   const globalLines = pointerLines(indexes.global)
-  let project = takePointers(projectLines, PROJECT_BYTE_SHARE, PROJECT_LINE_SHARE)
-  let global = takePointers(globalLines, GLOBAL_BYTE_SHARE, GLOBAL_LINE_SHARE)
+  let project = takePointers(projectLines, split.projectBytes, split.projectLines)
+  let global = takePointers(globalLines, split.globalBytes, split.globalLines)
 
   if (project.length === projectLines.length && global.length < globalLines.length) {
-    const remainingBytes = POINTER_BUDGET_BYTES - pointerBytes(project) - pointerBytes(global) - (global.length > 0 ? 1 : 0)
-    const remainingLines = POINTER_MAX_LINES - project.length - global.length
+    const remainingBytes = config.pointerBudgetBytes - pointerBytes(project) - pointerBytes(global) - (global.length > 0 ? 1 : 0)
+    const remainingLines = config.pointerMaxLines - project.length - global.length
     global = [...global, ...takePointers(globalLines.slice(global.length), remainingBytes, remainingLines)]
   } else if (global.length === globalLines.length && project.length < projectLines.length) {
-    const remainingBytes = POINTER_BUDGET_BYTES - pointerBytes(project) - pointerBytes(global) - (project.length > 0 ? 1 : 0)
-    const remainingLines = POINTER_MAX_LINES - project.length - global.length
+    const remainingBytes = config.pointerBudgetBytes - pointerBytes(project) - pointerBytes(global) - (project.length > 0 ? 1 : 0)
+    const remainingLines = config.pointerMaxLines - project.length - global.length
     project = [...project, ...takePointers(projectLines.slice(project.length), remainingBytes, remainingLines)]
   }
 
   let selected = selection({ indexes, projectLines, globalLines, project, global })
   let block = renderBlock(selected)
-  while (Buffer.byteLength(block, "utf8") > MEMORY_BLOCK_MAX_BYTES && (project.length > 0 || global.length > 0)) {
-    const projectPressure = pointerBytes(project) / PROJECT_SHARE
-    const globalPressure = pointerBytes(global) / (1 - PROJECT_SHARE)
+  while (Buffer.byteLength(block, "utf8") > config.maxBlockBytes && (project.length > 0 || global.length > 0)) {
+    const projectPressure = pointerBytes(project) / config.projectShare
+    const globalPressure = pointerBytes(global) / (1 - config.projectShare)
     if (project.length > 0 && (global.length === 0 || projectPressure >= globalPressure)) project = project.slice(0, -1)
     else global = global.slice(0, -1)
     selected = selection({ indexes, projectLines, globalLines, project, global })
@@ -77,9 +92,9 @@ export function buildSystemBlock(indexes: MemoryIndexes): string {
   return block
 }
 
-export function injectInto(system: string[], indexes: MemoryIndexes): void {
+export function injectInto(system: string[], indexes: MemoryIndexes, config: InjectionConfig = DEFAULT_INJECTION_CONFIG): void {
   if (system.some((entry) => entry.split("\n", 1)[0] === MEMORY_BLOCK_SENTINEL)) return
-  system.push(buildSystemBlock(indexes))
+  system.push(buildSystemBlock(indexes, config))
 }
 
 function pointerLines(index: InjectableIndex): readonly string[] {

@@ -80,4 +80,12 @@ describe("curation configuration", () => {
   test("disables provider egress by default", () => {
     expect(parseCurationOptions(undefined).allowProviderEgress).toBe(false)
   })
+
+  test("tolerates a sibling injection group without validating it", () => {
+    // Given a tuple carrying both option groups
+    const config = parseCurationOptions({ curation: { enabled: false }, injection: { maxBlockBytes: 5_000 } })
+
+    // Then the curation group parses independently of injection
+    expect(config.enabled).toBe(false)
+  })
 })

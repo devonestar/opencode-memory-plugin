@@ -3,6 +3,7 @@ import { basename } from "node:path"
 import { initializeMemoryRoots, initializeProjectStoreRoot, resolveProjectMemoryDir } from "./config"
 import { parseCurationOptions } from "./curation-config"
 import { createCurationRuntime } from "./curation-runtime"
+import { parseInjectionOptions } from "./injection-config"
 import { createLifecycleTools, type LifecycleToolRuntime } from "./lifecycle-tools"
 import { recoverLifecycleStore } from "./lifecycle-recovery"
 import { createLifecycleService } from "./lifecycle-service"
@@ -15,6 +16,7 @@ import { createStore } from "./store"
 
 const memoryPlugin: Plugin = async ({ project, client, directory }, options) => {
   const curationConfig = parseCurationOptions(options)
+  const injectionConfig = parseInjectionOptions(options)
   await initializeMemoryRoots()
   const globalRawStore = createStore()
   const globalRecovery = await recoverLifecycleStore({ storeRoot: globalRawStore.dir, scope: "global" })
@@ -63,7 +65,7 @@ const memoryPlugin: Plugin = async ({ project, client, directory }, options) => 
 
   return {
     "experimental.chat.system.transform": async (input, output) => {
-      await injectMemoryForSession(runtime, input.sessionID, output.system)
+      await injectMemoryForSession(runtime, input.sessionID, output.system, injectionConfig)
     },
     ...(curation === undefined ? {} : {
       event: async ({ event }) => { await curation.handleEvent(event) },
