@@ -248,6 +248,7 @@ Lifecycle 도구를 사용하면 검증된 primary session이 영속 메모리 �
 
 자동 적용은 로컬에서 입증된 `duplicate-exact` `MERGE`로 제한한다. 의미적 유사성, 오래된 콘텐츠에 대한 판단, 그 밖의 모든 비정확 일치 제안은 보고만 한다. Curation은 메모리 파일을 영구 삭제하지 않는다. 변경을 적용하기 전에 복구 가능한 원본을 해당 메모리 저장소의 `.trash/<runId>/` 아래에 보관한다.
 `duplicate-exact`에서 exact는 byte 단위 동일성이 아니라 파서가 정의한 앞뒤 공백 정규화를 거친 뒤 파싱한 `type`, `description`, `body`가 같다는 뜻이다. 내부 콘텐츠 차이는 여전히 안전하지 않은 것으로 본다. 원시 SHA-256 해시는 오래됐거나 변조된 원본을 계속 격리한다.
+큐레이터는 변경 제안이 없는 토픽에 `KEEP` operation을 만들지 않는다. 유효한 비정확 일치 operation은 본문을 제외한 namespace별 제안으로 저장하고, operation 내용과 source hash를 기준으로 중복을 제거한다. 다음 verified primary session에는 최대 3건을 전달한다. 이 전달은 best-effort이며 의미적 변경을 자동 적용할 권한을 추가하지 않는다.
 
 ## 아키텍처와 의존성 고정
 
