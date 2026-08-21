@@ -21,7 +21,7 @@ export type ActiveRun = {
   readonly phase: RunPhase
 }
 
-export type CurationResultStatus = "applied" | "no-op" | "dry-run" | "stale" | "validation-failed" | "failed" | "timeout"
+export type CurationResultStatus = "applied" | "report-only" | "no-op" | "dry-run" | "stale" | "validation-failed" | "failed" | "timeout"
 export type CurationResult = { readonly runId: string; readonly status: CurationResultStatus; readonly at: number; readonly reportPath?: string; readonly message?: string }
 export type RecoveryBlock = { readonly runId: string; readonly at: number; readonly message: string }
 
@@ -54,7 +54,7 @@ export type CurationRepository = {
 }
 
 const z = tool.schema
-const resultSchema = z.object({ runId: z.string(), status: z.enum(["applied", "no-op", "dry-run", "stale", "validation-failed", "failed", "timeout"]), at: z.number(), reportPath: z.string().optional(), message: z.string().optional() }).strict()
+const resultSchema = z.object({ runId: z.string(), status: z.enum(["applied", "report-only", "no-op", "dry-run", "stale", "validation-failed", "failed", "timeout"]), at: z.number(), reportPath: z.string().optional(), message: z.string().optional() }).strict()
 const activeSchema = z.object({ runId: z.string().regex(RUN_ID_RE), ownerToken: z.string().min(1), parentSessionID: z.string().min(1), childSessionID: z.string().min(1).optional(), startedAt: z.number(), deadlineAt: z.number(), dryRun: z.boolean(), automatic: z.boolean(), snapshotSha256: z.string().regex(/^[a-f0-9]{64}$/), phase: z.enum(RUN_PHASES).optional() }).strict()
 const metricsSchema = z.object({ topics: z.number(), oldestTopicAgeDays: z.number().nullable(), lastSuccessAgeDays: z.number().nullable(), largestIndexBytes: z.number(), indexRatio: z.number(), changedTopics: z.number() }).strict()
 const stateSchema = z.object({

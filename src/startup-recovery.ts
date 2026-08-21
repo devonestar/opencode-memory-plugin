@@ -100,7 +100,7 @@ async function recoverFinalizing(input: RecoveryInput, active: ActiveRun, snapsh
   }
   switch (manifest.status) {
     case "report-only":
-      await input.repository.complete(active.runId, active.ownerToken, { runId: active.runId, status: "no-op", at: input.clock(), reportPath: manifest.reportPath }, { at: input.clock(), inventory: snapshotInventory(snapshot) })
+      await input.repository.complete(active.runId, active.ownerToken, { runId: active.runId, status: "report-only", at: input.clock(), reportPath: manifest.reportPath }, { at: input.clock(), inventory: snapshotInventory(snapshot) })
       return
     case "dry-run":
       await input.repository.complete(active.runId, active.ownerToken, { runId: active.runId, status: "dry-run", at: input.clock(), reportPath: manifest.reportPath }, { at: input.clock(), inventory: snapshotInventory(snapshot) })
