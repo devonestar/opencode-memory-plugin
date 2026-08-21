@@ -1,6 +1,30 @@
 {
-  "name": "opencode-memory-plugin",
+  "name": "opencode-durable-memory",
+  "version": "0.1.0",
   "private": true,
+  "description": "Local-first durable memory plugin for the OpenCode coding agent: plain Markdown stores, deterministic BM25F recall with Korean n-grams, scope-isolated global and project memory, and curation that auto-applies only provably exact duplicates.",
+  "keywords": [
+    "opencode",
+    "opencode-plugin",
+    "agent-memory",
+    "persistent-memory",
+    "long-term-memory",
+    "coding-agent",
+    "local-first",
+    "bm25",
+    "markdown",
+    "ai-agents"
+  ],
+  "license": "MIT",
+  "author": "devonestar",
+  "homepage": "https://github.com/devonestar/opencode-durable-memory#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/devonestar/opencode-durable-memory.git"
+  },
+  "bugs": {
+    "url": "https://github.com/devonestar/opencode-durable-memory/issues"
+  },
   "type": "module",
   "scripts": {
     "test": "bun test",

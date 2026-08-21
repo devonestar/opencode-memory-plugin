@@ -1,8 +1,112 @@
-# OpenCode Memory Plugin
+# OpenCode Durable Memory
+
+OpenCode 코딩 에이전트를 위한 로컬 우선 영속 메모리. 디스크에 그대로 놓인 Markdown, 결정적 BM25F recall, 저장한 내용을 조용히 다시 쓰지 못하는 curation.
 
 [English](README.md) | [한국어](README.ko.md)
 
-이 비공개 OpenCode plugin은 session에 영속 메모리를 주입하고 메모리 저장, recall, lifecycle 도구를 제공한다. 전역 메모리와 프로젝트 메모리를 분리하며, 범위가 제한된 curation 작업 흐름도 제공한다. plugin 진입점은 `src/index.ts`다. OpenCode는 내보낸 모든 함수를 plugin으로 호출하므로 기본 plugin 생성 함수만 의도적으로 내보낸다.
+이 plugin은 session이 끝나도 남는 메모리를 OpenCode에 제공한다. 메모리 하나는 `${XDG_CONFIG_HOME:-~/.config}/opencode/memory/` 아래의 사람이 읽을 수 있는 Markdown 파일 하나다. system prompt에는 압축된 포인터 색인만 주입되고 본문은 도구가 읽을 때까지 디스크에 남아 있어서, 쓰이지 않는 메모리가 context를 잡아먹지 않는다. 전역 메모리와 작업 공간별 프로젝트 메모리는 서로 다른 저장소에 있다. 데이터베이스, 임베딩 모델, API 키, 읽기 경로의 네트워크 호출이 모두 없다.
+
+## 이 plugin을 쓰는 이유
+
+영속 메모리는 보통 세 가지로 실패한다. 사실을 잃어버리거나, 조용히 다시 쓰거나, context를 소리 없이 먹는다. 아래 보장은 각각 그 실패 하나를 막으며, [메모리 lifecycle과 recall](#메모리-lifecycle과-recall)의 규범 계약으로 강제된다.
+
+| 보장 | 실제 의미 |
+| --- | --- |
+| **데이터베이스 없는 Markdown** | `MEMORY.md` 색인 하나와 주제별 `<slug>.md` 파일. 자기 편집기에서 읽고 grep하고 diff하고 수정할 수 있다. 불투명한 저장 형식이나 벤더 종속이 없다. |
+| **임베딩도 벡터 저장소도 없음** | `memory_recall`은 요청 시점에 slug, description, body에 BM25F를 적용해 순위를 낸다. 모델 다운로드, 색인 빌드, API 키, 콜드 스타트가 없다. |
+| **결정적 순위** | 같은 코퍼스와 같은 질의는 항상 같은 순서를 만든다. 점수 내림차순, 동점이면 전역이 프로젝트보다 앞, 그다음 slug의 유니코드 코드포인트 순이다. recall은 모델을 호출하지 않고 대화 기록을 읽지 않으며 메모리를 변경하지 않는다. |
+| **한국어와 CJK recall이 동작** | 토큰화에 한국어 문자 n-gram이 포함되어, 띄어쓰기 없는 문장도 언어 모델 없이 검색된다. |
+| **두 저장소는 절대 섞이지 않음** | 범위를 지정한 작업은 다른 범위로 넘어가지 않고, 범위 교차 검색은 절반만 답하는 대신 전체가 실패한다. 손상된 저장소는 격리되며 정상인 쪽은 계속 쓸 수 있다. |
+| **주 session만 쓸 수 있음** | 자식 session과 subagent는 `SESSION_NOT_VERIFIED`를 받는다. subagent가 만든 잡음이 장기 메모리를 오염시키지 못한다. |
+| **curation은 증명한 것만 적용** | 자동 적용은 `duplicate-exact` 병합 하나로 제한된다. 파싱된 `type`, `description`, `body`의 동일성을 로컬에서 확인하고, SHA-256 해시로 낡거나 조작된 원본을 차단한다. 유사, 낡음, 대체 같은 의미 판단은 전부 보고 전용이며 사용자 승인을 기다린다. |
+| **curation은 되돌릴 수 있고 한계가 있음** | 적용 전에 복구 가능한 원본을 `.trash/<runId>/`에 보관하고, curation은 메모리 파일을 완전 삭제하지 않으며, curator subagent에는 도구가 하나도 없고, 한 session에 도달하는 제안은 최대 세 개다. 일시 중지, 재개, 강제 실행, 상태 확인은 slash command로 한다. |
+| **완전 삭제가 없음** | archive와 delete는 출처 메타데이터를 유지한 불변 항목 하나를 옮긴다. restore는 정확한 `(scope, source, entry_id)` 하나만 대상으로 하며 덮어쓰기, 병합, 이름 변경을 하지 않는다. slug가 이미 차 있으면 `ACTIVE_COLLISION`을 반환하고 아무것도 바꾸지 않는다. |
+| **추측이 아닌 격리로 얻는 장애 안전성** | 중단된 변경은 커밋된 결과로 멱등하게 수렴하거나, 그 저장소가 `RECOVERY_BLOCKED`로 격리된다. 불완전한 묶음이 독자에게 보이는 일은 없다. |
+| **한계가 정해진 context 비용** | 주입 블록, 포인터 줄 수, 범위별 배분은 바이트 예산으로 설정된다. recall은 주제 200개, 주제당 32 KiB, 합계 512 KiB, 응답 25,000바이트에서 상한이 걸리고 본문 없이 메타데이터만 돌려준다. |
+| **README가 계약** | RFC 2119 요구사항, 빠짐없는 공개 오류 표, 수용 시나리오가 있다. 관측 가능한 동작을 바꾸는 runtime 변경은 같은 리비전에서 그 절을 함께 바꿔야 한다. |
+
+## 다른 방식과의 비교
+
+| 방식 | 이 plugin이 다른 점 |
+| --- | --- |
+| `AGENTS.md`, `CLAUDE.md` 같은 정적 지침 파일 | 항상 context에 전부 올라가고 lifecycle과 범위가 없으며 예산 없이 커진다. 여기서는 포인터 색인만 주입되고 본문은 필요할 때 읽는다. |
+| 호스팅 메모리 서비스 | API 키와 네트워크 왕복이 필요하고, 사실이 기기 밖으로 나가며, 순위 산정이 불투명하다. 여기서는 전부 로컬에서 돌고 순위 공식이 문서에 적혀 있다. |
+| 임베딩 기반 로컬 plugin | 모델을 함께 배포하고 색인을 만들며, 결정적이지 않은 이웃을 돌려주고 CJK 동작을 보장하는 경우가 드물다. BM25F는 즉시 동작하고 재현 가능하며 한국어 n-gram을 토큰화한다. |
+| 에이전트가 관리하는 메모리 | 모델이 무엇을 병합하고 버릴지 결정한다. 여기서 모델은 제안만 할 수 있고, 유일한 자동 적용은 로컬에서 증명된 완전 중복이다. |
+
+이 설계의 대가는 그대로 밝힌다. recall은 어휘 기반이므로 질의와 공통 어휘가 없는 메모리는 찾지 못한다. 결정성, 감사 가능성, 추론 비용 0을 얻기 위한 의도된 교환이다.
+
+## 설치
+
+`opencode` CLI와 [Bun](https://bun.sh)이 필요하다. plugin은 OpenCode가 절대 경로로 불러오는 로컬 checkout에서 실행된다. npm에 배포되어 있지 않으므로 아래 네 단계가 설치 전부이며, placeholder를 채우지 않고 순서대로 실행할 수 있다.
+
+**1. clone하고 checkout을 검증한다.**
+
+```sh
+git clone https://github.com/devonestar/opencode-durable-memory.git
+cd opencode-durable-memory
+bun install
+bun run typecheck
+```
+
+**2. plugin을 등록한다.** `${XDG_CONFIG_HOME:-~/.config}/opencode/opencode.jsonc`의 `plugin` 배열에 `src/index.ts`의 절대 경로를 항목 하나로 추가한다. 넣을 값은 `echo "$(pwd)/src/index.ts"`로 출력한다.
+
+```jsonc
+{
+  "plugin": ["/absolute/path/to/opencode-durable-memory/src/index.ts"]
+}
+```
+
+이 문자열 항목 하나로 설치가 끝난다. 저장, recall, lifecycle 도구가 모두 동작하고, `allowProviderEgress`가 기본값 `false`이므로 curation은 동작하지 않는다. 즉 직접 켜기 전까지 메모리 내용이 모델 제공자에게 전달되지 않는다. curation을 켜고 주입 예산을 조정하는 tuple 형식은 [OpenCode 연결](#opencode-연결)에 있다.
+
+**3. agent, command, skill 자산을 연결한다.** 저장소 루트에서 실행하면 경로를 스스로 해석한다.
+
+```sh
+REPO="$(pwd)"
+CONFIG_ROOT="${XDG_CONFIG_HOME:-$HOME/.config}/opencode"
+
+mkdir -p "$CONFIG_ROOT/agent" "$CONFIG_ROOT/command" "$CONFIG_ROOT/skills/memory-types"
+ln -sfn "$REPO/opencode/agent/memory-curator.md" "$CONFIG_ROOT/agent/memory-curator.md"
+ln -sfn "$REPO/opencode/command/memory-review.md" "$CONFIG_ROOT/command/memory-review.md"
+ln -sfn "$REPO/opencode/command/memory-curation-status.md" "$CONFIG_ROOT/command/memory-curation-status.md"
+ln -sfn "$REPO/opencode/command/memory-curation-run.md" "$CONFIG_ROOT/command/memory-curation-run.md"
+ln -sfn "$REPO/opencode/command/memory-curation-pause.md" "$CONFIG_ROOT/command/memory-curation-pause.md"
+ln -sfn "$REPO/opencode/command/memory-curation-resume.md" "$CONFIG_ROOT/command/memory-curation-resume.md"
+ln -sfn "$REPO/opencode/skills/memory-types/SKILL.md" "$CONFIG_ROOT/skills/memory-types/SKILL.md"
+```
+
+**4. 재시작하고 확인한다.** OpenCode는 설정, plugin, agent, command, skill을 시작 시점에 불러오므로 종료하고 다시 실행한 뒤 세 가지가 모두 해석되었는지 확인한다.
+
+```sh
+opencode debug config
+opencode debug skill
+```
+
+### 도구
+
+| 도구 | 용도 |
+| --- | --- |
+| `memory_save(scope, type, slug, description, body)` | 지속되는 학습 하나를 `global` 또는 `project` 저장소에 기록한다. |
+| `memory_recall(query, scope, limit)` | 활성 메모리에서 메타데이터만 반환하는 BM25F 검색. |
+| `memory_recall_archive(query, scope, limit)` | 한 범위의 보관 항목을 같은 방식으로 검색한다. |
+| `memory_archive(scope, slug)` | 활성 주제 하나를 복구 가능한 항목으로 남기고 사용에서 제외한다. |
+| `memory_delete(scope, slug)` | 활성 주제 하나를 복구 가능한 항목으로 남기고 사용자 휴지통으로 옮긴다. |
+| `memory_restore(scope, source, entry_id)` | 정확히 지정된 항목 하나를 원래 slug로 되돌린다. |
+| `memory_curation_status()` | 가려진 curation 상태, 적격성 지표, 보고서 존재 여부. |
+| `memory_curation_run(dryRun)` | 임계값과 대기 시간을 우회해 curation을 한 번 강제 실행한다. |
+| `memory_curation_control(action)` | 자동 및 수동 curation을 일시 중지하거나 재개한다. |
+
+### 명령
+
+| 명령 | 용도 |
+| --- | --- |
+| `/memory-review` | subagent로 누적된 메모리를 점검하고 병합, 재작성, 삭제를 제안한다. 검토 전용이며 쓰지 않는다. |
+| `/memory-curation-status` | curation 상태, 적격성 지표, 보고서 존재 여부를 보여준다. |
+| `/memory-curation-run` | 로컬에서 검증된 안전한 작업만 적용하는 비동기 curation 실행을 강제한다. |
+| `/memory-curation-pause` | 자동 및 수동 curation을 일시 중지한다. |
+| `/memory-curation-resume` | 자동 및 수동 curation을 재개한다. |
+
+plugin 진입점은 `src/index.ts`다. OpenCode는 내보낸 모든 함수를 plugin으로 호출하므로 기본 plugin 생성 함수만 의도적으로 내보낸다.
 
 ## 메모리 데이터와 범위
 
@@ -21,7 +125,7 @@
 
 ```jsonc
 [
-  "/absolute/path/to/opencode-memory-plugin/src/index.ts",
+  "/absolute/path/to/opencode-durable-memory/src/index.ts",
   {
     "curation": {
       "enabled": true,
@@ -86,7 +190,7 @@ OpenCode는 시작할 때 설정, plugin, agent, command, skill을 불러온다.
 2. 새 저장소 절대 경로로 symlink 7개를 모두 다시 만든다.
 
 ```sh
-REPO="/absolute/path/to/opencode-memory-plugin"
+REPO="/absolute/path/to/opencode-durable-memory"
 CONFIG_ROOT="${XDG_CONFIG_HOME:-$HOME/.config}/opencode"
 
 mkdir -p "$CONFIG_ROOT/agent" "$CONFIG_ROOT/command" "$CONFIG_ROOT/skills/memory-types"
