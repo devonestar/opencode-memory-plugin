@@ -2,7 +2,8 @@ import { createHash } from "node:crypto"
 import { join } from "node:path"
 import { tool } from "@opencode-ai/plugin"
 import { withLock } from "./fsutil"
-import { ensurePrivateDir, readPrivate, writePrivate } from "./private-fs"
+import { PrivateLimitError, readPrivateBytesBounded } from "./private-contained"
+import { ensurePrivateDir, writePrivate } from "./private-fs"
 import type { ProposalOperation, ProposalSource, Replacement } from "./proposal"
 
 export const CURATION_SUGGESTION_MAX_ENTRIES = 200
@@ -37,7 +38,7 @@ export type CurationSuggestionRepository = {
   readonly paths: CurationSuggestionPaths
   list(): Promise<readonly CurationSuggestion[]>
   add(input: AddCurationSuggestion): Promise<CurationSuggestion>
-  claim(limit: number): Promise<readonly CurationSuggestion[]>
+  claim(limit: number, fits: (suggestions: readonly CurationSuggestion[]) => boolean): Promise<readonly CurationSuggestion[]>
 }
 
 export type RecordCurationSuggestionsInput = {
@@ -50,8 +51,8 @@ const z = tool.schema
 const HASH_RE = /^[a-f0-9]{64}$/
 const LABEL_RE = /^[a-z0-9][a-z0-9-]{0,127}$/
 const OPERATION_ID_RE = /^[a-z0-9][a-z0-9-]{0,99}$/
-const REASON_RE = /^[a-z][a-z0-9-]{0,99}$/
-const SLUG_RE = /^[a-z0-9][a-z0-9-]{0,99}$/
+const REASON_RE = /^[a-z][a-z0-9-]*$/
+const SLUG_RE = /^[a-z0-9][a-z0-9-]*$/
 const sourceSchema = z.object({ scope: z.enum(["global", "project"]), slug: z.string().regex(SLUG_RE), sha256: z.string().regex(HASH_RE) }).strict()
 const destinationSchema = z.object({ scope: z.enum(["global", "project"]), slug: z.string().regex(SLUG_RE) }).strict()
 const entrySchema = z.object({
@@ -139,12 +140,12 @@ export function curationOutcomeSummary(actionableSuggestions: number, exactMerge
 async function load(root: string, path: string): Promise<readonly CurationSuggestion[]> {
   let raw: string
   try {
-    raw = await readPrivate(root, path)
+    raw = (await readPrivateBytesBounded(root, path, CURATION_SUGGESTION_MAX_BYTES)).bytes.toString("utf8")
   } catch (error) {
     if (error instanceof Error && "code" in error && error.code === "ENOENT") return []
+    if (error instanceof PrivateLimitError) throw new CurationSuggestionInboxError("file exceeds byte limit")
     throw error
   }
-  if (Buffer.byteLength(raw, "utf8") > CURATION_SUGGESTION_MAX_BYTES) throw new CurationSuggestionInboxError("file exceeds byte limit")
   let decoded: unknown
   try {
     decoded = JSON.parse(raw)
@@ -198,15 +199,20 @@ export function createCurationSuggestionRepository(globalDir: string, namespace:
       await save(globalDir, paths.inbox, next)
       return entry
     }),
-    claim: async (limit) => {
+    claim: async (limit, fits) => {
       if (!Number.isInteger(limit) || limit < 1 || limit > CURATION_SUGGESTION_CLAIM_MAX) throw new CurationSuggestionClaimLimitError(limit)
+      if ((await load(globalDir, paths.inbox)).length === 0) return []
       await ensurePrivateDir(globalDir, root)
       return withLock(paths.lock, async () => {
         const entries = await load(globalDir, paths.inbox)
         if (entries.length === 0) return []
-        const claimed = entries.slice(0, limit)
-        await save(globalDir, paths.inbox, entries.slice(limit))
-        return claimed
+        for (let count = Math.min(limit, entries.length); count >= 1; count -= 1) {
+          const candidate = entries.slice(0, count)
+          if (!fits(candidate)) continue
+          await save(globalDir, paths.inbox, entries.slice(count))
+          return candidate
+        }
+        return []
       }, { retryMs: 0, maxRetries: 1, sleep: async () => undefined })
     },
   }

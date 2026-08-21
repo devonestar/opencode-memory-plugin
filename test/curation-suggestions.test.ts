@@ -8,7 +8,7 @@ import {
   suggestionFingerprint,
 } from "../src/curation-suggestions"
 import { LockTimeoutError, withLock } from "../src/fsutil"
-import type { ProposalOperation, ProposalSource } from "../src/proposal"
+import { parseProposal, type ProposalOperation, type ProposalSource } from "../src/proposal"
 
 const HASH_A = "a".repeat(64)
 const HASH_B = "b".repeat(64)
@@ -127,11 +127,57 @@ describe("curation suggestion repository", () => {
     await repository.add({ runId: "newest-run", operation: rewrite("newest", [source("newest", HASH_A)]), at: 3 })
 
     // When one suggestion is claimed
-    const claimed = await repository.claim(1)
+    const claimed = await repository.claim(1, () => true)
 
     // Then the oldest is consumed and later entries remain ordered
     expect(claimed.map((entry) => entry.runId)).toEqual(["oldest-run"])
     expect((await repository.list()).map((entry) => entry.runId)).toEqual(["middle-run", "newest-run"])
+  })
+
+  test("claims the largest oldest prefix accepted by the renderer", async () => {
+    // Given three advisory suggestions and a renderer that can retain only two
+    const repository = createCurationSuggestionRepository(dir, "project-abc")
+    await repository.add({ runId: "oldest-run", operation: rewrite("oldest", [source("oldest")]), at: 1 })
+    await repository.add({ runId: "middle-run", operation: rewrite("middle", [source("middle")]), at: 2 })
+    await repository.add({ runId: "newest-run", operation: rewrite("newest", [source("newest")]), at: 3 })
+
+    // When the claim tests candidate prefixes from three down to one
+    const tested: number[] = []
+    const claimed = await repository.claim(3, (candidate) => {
+      tested.push(candidate.length)
+      return candidate.length <= 2
+    })
+
+    // Then the largest fitting oldest prefix is consumed and the newest remains
+    expect(tested).toEqual([3, 2])
+    expect(claimed.map((entry) => entry.runId)).toEqual(["oldest-run", "middle-run"])
+    expect((await repository.list()).map((entry) => entry.runId)).toEqual(["newest-run"])
+  })
+
+  test.each(["missing", "empty"])("returns from a %s inbox without acquiring the busy lock", async (state) => {
+    // Given a missing or explicitly empty inbox while another process holds its lock
+    const repository = createCurationSuggestionRepository(dir, "project-abc")
+    await mkdir(dirname(repository.paths.inbox), { recursive: true, mode: 0o700 })
+    if (state === "empty") await writeFile(repository.paths.inbox, `${JSON.stringify({ version: 1, entries: [] })}\n`, { mode: 0o600 })
+    const entered = Promise.withResolvers<void>()
+    const release = Promise.withResolvers<void>()
+    const holder = withLock(repository.paths.lock, async () => {
+      entered.resolve()
+      await release.promise
+    })
+    await entered.promise
+
+    // When injection checks the inbox
+    let claimed: readonly unknown[] = []
+    try {
+      claimed = await repository.claim(3, () => true)
+    } finally {
+      release.resolve()
+      await holder
+    }
+
+    // Then it returns empty without contending on or writing through the lock
+    expect(claimed).toEqual([])
   })
 
   test("fails a claim immediately while the suggestion lock is held", async () => {
@@ -147,7 +193,7 @@ describe("curation suggestion repository", () => {
     await entered.promise
 
     // When an ordinary injection attempts to claim from the busy inbox
-    const claim = repository.claim(1).then(
+    const claim = repository.claim(1, () => true).then(
       () => ({ kind: "fulfilled" as const }),
       (error: unknown) => ({ kind: "rejected" as const, error }),
     )
@@ -172,7 +218,7 @@ describe("curation suggestion repository", () => {
     const before = await repository.list()
 
     // When the invalid limit is claimed
-    const claim = repository.claim(limit)
+    const claim = repository.claim(limit, () => true)
 
     // Then validation rejects the claim and preserves every entry
     await expect(claim).rejects.toThrow("claim limit")
@@ -204,5 +250,33 @@ describe("curation suggestion repository", () => {
 
     // Then the repository fails closed before parsing its contents
     await expect(listing).rejects.toThrow("file exceeds byte limit")
+  })
+
+  test("accepts every proposal-valid slug and reason shape in the persisted inbox", async () => {
+    // Given a proposal with source/destination slugs and a reason beyond the inbox's former 100-character caps
+    const longSlug = `topic-${"s".repeat(140)}`
+    const longReason = `reason-${"r".repeat(140)}`
+    const operation = parseProposal(JSON.stringify({
+      version: 1,
+      snapshotSha256: HASH_A,
+      operations: [{
+        id: "operation",
+        kind: "REWRITE",
+        confidence: "high",
+        reasonCode: longReason,
+        sources: [{ scope: "global", slug: longSlug, sha256: HASH_B }],
+        replacement: { scope: "project", slug: longSlug, type: "project", description: "description", body: "body" },
+      }],
+      findings: [],
+      summary: { reviewed: 1, highConfidence: 1, ambiguous: 0 },
+    })).operations[0]
+    if (operation === undefined) throw new TypeError("proposal fixture omitted its operation")
+    const repository = createCurationSuggestionRepository(dir, "project-abc")
+
+    // When the proposal-valid operation crosses the inbox boundary
+    await repository.add({ runId: "run", operation, at: 1 })
+
+    // Then the inbox preserves the same accepted values
+    expect(await repository.list()).toMatchObject([{ reasonCode: longReason, sources: [{ slug: longSlug }], destination: { slug: longSlug } }])
   })
 })
