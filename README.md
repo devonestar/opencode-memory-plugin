@@ -1,8 +1,112 @@
-# OpenCode Memory Plugin
+# OpenCode Durable Memory
+
+Local-first durable memory for the OpenCode coding agent. Plain Markdown on disk, deterministic BM25F recall, and curation that cannot silently rewrite what you saved.
 
 [English](README.md) | [한국어](README.ko.md)
 
-This private OpenCode plugin injects durable memory into sessions, exposes memory save, recall, and lifecycle tools, keeps global and project memories separate, and provides bounded curation workflows. The plugin entry point is `src/index.ts`; it intentionally exports only a default plugin factory because OpenCode invokes every exported function as a plugin.
+This plugin gives OpenCode memory that survives across sessions. Each memory is one human-readable Markdown file under `${XDG_CONFIG_HOME:-~/.config}/opencode/memory/`. A compact pointer index is injected into the system prompt and bodies stay on disk until a tool reads them, so memory does not consume context it is not being used for. Global memories and per-workspace project memories live in separate stores. There is no database, no embedding model, no API key, and no network call on the read path.
+
+## Why this plugin
+
+Durable agent memory usually fails in one of three ways: it loses facts, it silently rewrites them, or it quietly eats the context window. Each guarantee below closes one of those failures, and each is enforced by the normative contract in [Memory lifecycle and recall](#memory-lifecycle-and-recall).
+
+| Guarantee | What it means in practice |
+| --- | --- |
+| **Plain Markdown, no database** | One `MEMORY.md` index plus one `<slug>.md` file per topic. Read, grep, diff, and edit memory in your own editor. Nothing is opaque or vendor-locked. |
+| **No embeddings, no vector store** | `memory_recall` ranks with BM25F over slug, description, and body at request time. No model download, no index build, no API key, no cold start. |
+| **Deterministic ranking** | The same corpus and query always produce the same order: descending score, then global before project, then slug by Unicode code point. Recall never calls a model, reads transcripts, or mutates memory. |
+| **Korean and CJK recall works** | Tokenization includes Korean character n-grams, so text without word spacing stays searchable without a language model. |
+| **Two stores, never mixed** | A scoped operation never falls back to the other scope, and a cross-scope search fails as a whole rather than returning half an answer. A broken store is fenced without disabling the healthy one. |
+| **Only your main session can write** | Child and subagent sessions get `SESSION_NOT_VERIFIED`. Subagent chatter cannot pollute long-term memory. |
+| **Curation proves before it applies** | Automatic apply is limited to a `duplicate-exact` merge, checked locally by parsed `type`, `description`, and `body` equality, with SHA-256 hashes fencing stale or tampered sources. Every semantic judgment such as similar, stale, or superseded is report-only and waits for your approval. |
+| **Curation is reversible and bounded** | Recoverable pre-images are archived under `.trash/<runId>/` before any applied change, curation never hard-deletes a memory file, the curator subagent has no tools at all, and at most three suggestions reach one session. Pause, resume, force a run, or inspect status from slash commands. |
+| **Nothing is hard-deleted** | Archive and delete each move one immutable entry that keeps its origin metadata. Restore addresses one exact `(scope, source, entry_id)` tuple and never overwrites, merges, or renames. An occupied slug returns `ACTIVE_COLLISION` and mutates nothing. |
+| **Crash-safe by fencing, not guessing** | An interrupted mutation either converges idempotently to its committed result or that store is fenced with `RECOVERY_BLOCKED`. A partial bundle never becomes visible to a reader. |
+| **Bounded context cost** | The injected block, pointer lines, and per-scope share are byte-budgeted and configurable. Recall caps at 200 topics, 32 KiB per topic, 512 KiB aggregate, and a 25,000-byte response, and returns metadata only, never bodies. |
+| **The README is the contract** | RFC 2119 requirements, an exhaustive public error matrix, and acceptance scenarios. A runtime change that alters observable behavior has to change that section in the same revision. |
+
+## How it compares
+
+| Approach | Where this plugin differs |
+| --- | --- |
+| Static instruction files such as `AGENTS.md` or `CLAUDE.md` | They sit fully in context, have no lifecycle or scoping, and grow without a budget. Here only a pointer index is injected and bodies are fetched on demand. |
+| Hosted memory services | They need an API key and a network round trip, your facts leave the machine, and ranking is opaque. Here everything runs locally and the ranking formula is written down. |
+| Embedding-based local plugins | They ship a model, build an index, return non-deterministic neighbours, and rarely guarantee CJK behavior. BM25F is instant, reproducible, and tokenizes Korean n-grams. |
+| Agent-managed memory | A model decides what to merge or drop. Here a model may only propose, and the single automatic apply is a locally proven exact duplicate. |
+
+The cost of this design is stated plainly: recall is lexical, so it will not surface a memory that shares no terms with your query. That is a deliberate trade for determinism, auditability, and zero inference cost.
+
+## Install
+
+Requires the `opencode` CLI and [Bun](https://bun.sh). The plugin runs from a local checkout that OpenCode loads by absolute path. It is not published on npm, so the four steps below are the whole installation and they are safe to run in order without editing any placeholder.
+
+**1. Clone and verify the checkout.**
+
+```sh
+git clone https://github.com/devonestar/opencode-durable-memory.git
+cd opencode-durable-memory
+bun install
+bun run typecheck
+```
+
+**2. Register the plugin.** Add the absolute path to `src/index.ts` as one entry of the `plugin` array in `${XDG_CONFIG_HOME:-~/.config}/opencode/opencode.jsonc`. Print the exact value with `echo "$(pwd)/src/index.ts"`.
+
+```jsonc
+{
+  "plugin": ["/absolute/path/to/opencode-durable-memory/src/index.ts"]
+}
+```
+
+That bare string entry is a complete install. Save, recall, and lifecycle tools all work, and curation stays inert because `allowProviderEgress` defaults to `false`, so no memory content reaches a model provider until you opt in. [OpenCode wiring](#opencode-wiring) documents the tuple form that enables curation and tunes injection budgets.
+
+**3. Link the agent, command, and skill assets.** Run this from the repository root; it resolves its own paths.
+
+```sh
+REPO="$(pwd)"
+CONFIG_ROOT="${XDG_CONFIG_HOME:-$HOME/.config}/opencode"
+
+mkdir -p "$CONFIG_ROOT/agent" "$CONFIG_ROOT/command" "$CONFIG_ROOT/skills/memory-types"
+ln -sfn "$REPO/opencode/agent/memory-curator.md" "$CONFIG_ROOT/agent/memory-curator.md"
+ln -sfn "$REPO/opencode/command/memory-review.md" "$CONFIG_ROOT/command/memory-review.md"
+ln -sfn "$REPO/opencode/command/memory-curation-status.md" "$CONFIG_ROOT/command/memory-curation-status.md"
+ln -sfn "$REPO/opencode/command/memory-curation-run.md" "$CONFIG_ROOT/command/memory-curation-run.md"
+ln -sfn "$REPO/opencode/command/memory-curation-pause.md" "$CONFIG_ROOT/command/memory-curation-pause.md"
+ln -sfn "$REPO/opencode/command/memory-curation-resume.md" "$CONFIG_ROOT/command/memory-curation-resume.md"
+ln -sfn "$REPO/opencode/skills/memory-types/SKILL.md" "$CONFIG_ROOT/skills/memory-types/SKILL.md"
+```
+
+**4. Restart and verify.** OpenCode loads configuration, plugins, agents, commands, and skills at startup, so quit and restart it, then check that all three resolved.
+
+```sh
+opencode debug config
+opencode debug skill
+```
+
+### Tools
+
+| Tool | Purpose |
+| --- | --- |
+| `memory_save(scope, type, slug, description, body)` | Persist one durable learning to the `global` or `project` store. |
+| `memory_recall(query, scope, limit)` | Metadata-only BM25F search across active memory. |
+| `memory_recall_archive(query, scope, limit)` | The same search over archived entries in one scope. |
+| `memory_archive(scope, slug)` | Move one active topic out of use, keeping a recoverable entry. |
+| `memory_delete(scope, slug)` | Move one active topic to user trash, keeping a recoverable entry. |
+| `memory_restore(scope, source, entry_id)` | Restore one exact entry at its original slug. |
+| `memory_curation_status()` | Redacted curation state, eligibility metrics, and report availability. |
+| `memory_curation_run(dryRun)` | Force one curation run, bypassing thresholds and cooldown. |
+| `memory_curation_control(action)` | Pause or resume automatic and manual curation. |
+
+### Commands
+
+| Command | Purpose |
+| --- | --- |
+| `/memory-review` | Audit accumulated memories with a subagent and propose merges, rewrites, and deletions. Review only, never writes. |
+| `/memory-curation-status` | Show curation status, eligibility metrics, and report availability. |
+| `/memory-curation-run` | Force an asynchronous curation run that applies only locally validated safe operations. |
+| `/memory-curation-pause` | Pause automatic and manual curation. |
+| `/memory-curation-resume` | Resume automatic and manual curation. |
+
+The plugin entry point is `src/index.ts`. It intentionally exports only a default plugin factory, because OpenCode invokes every exported function as a plugin.
 
 ## Memory data and scopes
 
@@ -21,7 +125,7 @@ The global config at `${XDG_CONFIG_HOME:-~/.config}/opencode/opencode.jsonc` loa
 
 ```jsonc
 [
-  "/absolute/path/to/opencode-memory-plugin/src/index.ts",
+  "/absolute/path/to/opencode-durable-memory/src/index.ts",
   {
     "curation": {
       "enabled": true,
@@ -86,7 +190,7 @@ If the repository moves:
 2. Recreate all seven symlinks with the new absolute repository path:
 
 ```sh
-REPO="/absolute/path/to/opencode-memory-plugin"
+REPO="/absolute/path/to/opencode-durable-memory"
 CONFIG_ROOT="${XDG_CONFIG_HOME:-$HOME/.config}/opencode"
 
 mkdir -p "$CONFIG_ROOT/agent" "$CONFIG_ROOT/command" "$CONFIG_ROOT/skills/memory-types"
