@@ -1,10 +1,10 @@
 import { tool } from "@opencode-ai/plugin"
 import { INDEX_MAX_BYTES, INDEX_TARGET_RATIO } from "./config"
-import type { CurationSuggestionRepository } from "./curation-suggestions"
+import type { CurationSuggestion, CurationSuggestionRepository } from "./curation-suggestions"
 import { MEMORY_TYPES } from "./frontmatter"
 import { isSafeDescription, MEMORY_SCOPES, type MemoryScope, SaveGateError, validateSaveInput } from "./gate"
 import { DEFAULT_INJECTION_CONFIG, type InjectionConfig } from "./injection-config"
-import { buildSystemBlock, hasMemoryBlock, type InjectableSuggestion } from "./prompt"
+import { buildSystemBlock, buildSystemBlockResult, hasMemoryBlock, type InjectableSuggestion } from "./prompt"
 import { PathContainmentError, type MemoryStore, type SaveOutcome } from "./store"
 
 export type SessionClassification = "primary" | "child" | "unknown"
@@ -134,17 +134,24 @@ export async function injectMemoryForSession(
   const reservationIndex = system.length
   system.push(buildSystemBlock(indexes, config))
   if (classification !== "primary" || runtime.suggestionRepository === undefined) return
-  const claimed = await runtime.suggestionRepository.claim(SUGGESTION_DELIVERY_LIMIT).catch(() => null)
+  const claimed = await runtime.suggestionRepository.claim(SUGGESTION_DELIVERY_LIMIT, (candidate) => {
+    const result = buildSystemBlockResult(indexes, config, injectableSuggestions(candidate))
+    return result.retainedSuggestionCount === candidate.length
+  }).catch(() => null)
   if (claimed === null) return
-  const suggestions: readonly InjectableSuggestion[] = claimed.map((suggestion) => ({
+  system[reservationIndex] = buildSystemBlock(indexes, config, injectableSuggestions(claimed))
+}
+
+function injectableSuggestions(suggestions: readonly CurationSuggestion[]): readonly InjectableSuggestion[] {
+  return suggestions.map((suggestion) => ({
     kind: suggestion.kind,
     reasonCode: suggestion.reasonCode,
     sourceSlugs: suggestion.sources.map((source) => `${source.scope}:${source.slug}`),
     sourceCount: suggestion.sources.length,
     destination: suggestion.destination,
-    locator: suggestion.key,
+    runId: suggestion.runId,
+    operationId: suggestion.operationId,
   }))
-  system[reservationIndex] = buildSystemBlock(indexes, config, suggestions)
 }
 
 function selectStores(runtime: MemoryRuntime, scope: MemoryScope): StoreSelection {
