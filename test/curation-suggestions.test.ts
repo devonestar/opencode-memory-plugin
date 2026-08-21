@@ -277,6 +277,6 @@ describe("curation suggestion repository", () => {
     await repository.add({ runId: "run", operation, at: 1 })
 
     // Then the inbox preserves the same accepted values
-    expect(await repository.list()).toMatchObject([{ reasonCode: longReason, sources: [{ slug: longSlug }], destination: { slug: longSlug } }])
+    expect(await repository.list()).toMatchObject([{ reasonCode: longReason, sourcePreview: [{ slug: longSlug }], sourceCount: 1, destination: { slug: longSlug } }])
   })
 })
