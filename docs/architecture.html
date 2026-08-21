@@ -1300,7 +1300,7 @@ $CONFIG_ROOT/skills/memory-types/SKILL.md → <span class="file" data-config-ass
               <div class="node"><strong>src/orchestrator.ts</strong><span>event · lease · child session · timeout · finalize · dispose</span></div>
               <div class="node"><strong>src/curation-state.ts</strong><span><code>reserved → dispatched → finalizing | timed-out</code> · journal · recovery-blocked</span></div>
               <div class="node"><strong>src/proposal.ts</strong><span>closed sparse schema · source uniqueness · allowlist · deterministic survivor</span></div>
-              <div class="node"><strong>src/curation-suggestions.ts</strong><span>namespace-local metadata inbox · content-addressed dedupe · bounded claim</span></div>
+              <div class="node"><strong>src/curation-suggestions.ts</strong><span>namespace-local metadata inbox · all-source fingerprint · two-source preview · batched record · fit-aware claim</span></div>
               <div class="node"><strong>src/apply-plan.ts</strong><span>survivors / removals · canonical index rebuild preserving order</span></div>
               <div class="node"><strong>src/apply.ts + src/apply-transaction.ts</strong><span>journaled apply · trash moves · rollback</span></div>
               <div class="node"><strong>src/artifacts.ts + src/reports.ts</strong><span>manifest / journal / report / diff</span></div>
@@ -1321,7 +1321,7 @@ $CONFIG_ROOT/skills/memory-types/SKILL.md → <span class="file" data-config-ass
 │   ├── <span class="file">settings.json</span> <span class="comment">pause state</span>
 │   └── <span class="file">projects/&lt;namespace&gt;/</span>
 │       ├── <span class="file">state.json</span> <span class="comment">lease / cooldown / inventory</span>
-│       ├── <span class="file">suggestions.json</span> <span class="comment">metadata-only suggestion inbox</span>
+│       ├── <span class="file">suggestions.json</span> <span class="comment">metadata-only: two-source preview + exact sourceCount + report locators</span>
 │       └── <span class="file">runs/&lt;runId&gt;/</span>
 │           ├── <span class="file">manifest.json</span>  <span class="file">plan.json</span>  <span class="file">journal.json</span>
 │           └── <span class="file">proposal.json</span>  <span class="file">report.md</span>  <span class="file">diff.md</span>
@@ -1660,7 +1660,7 @@ $CONFIG_ROOT/skills/memory-types/SKILL.md → <span class="file" data-config-ass
                 <li>중복 원본을 <code>.trash/&lt;runId&gt;/</code>로 이동하고 index preimage를 <code>.trash/&lt;runId&gt;/MEMORY.md.before</code>로 보존</li>
                 <li>인덱스 교체 후 applied manifest를 commit 경계로 기록</li>
               </ol>
-              <div class="stage-grid"><div class="fact-card good"><h4>생존자 바이트 불변</h4><p>생존자 토픽은 절대 재작성하지 않습니다. 모델이 만든 replacement body가 디스크에 기록되는 경로는 없습니다.</p></div><div class="fact-card warn"><h4>삭제가 아니라 보존 이동</h4><p>하드 삭제는 없습니다. 중복 사본과 preimage는 <code>.trash</code>에 남고 자동 정리되지 않습니다.</p></div><div class="fact-card"><h4>유효 완료 후 제안 기록</h4><p><code>applied</code> 또는 <code>report-only</code>로 유효하게 완료된 뒤 non-KEEP report-only operation만 namespace의 <code>suggestions.json</code>에 기록합니다. dry-run, stale, timeout, validation failure에는 기록하지 않습니다.</p></div><div class="fact-card"><h4>콘텐츠 주소 기반 중복 제거</h4><p>kind, reason, 정렬된 source와 source hash, destination, replacement 내용을 canonical hash로 묶습니다. inbox에는 본문과 description 없이 구조 메타데이터와 hash key만 저장하며 최대 200개, 512 KiB로 제한합니다.</p></div></div>
+              <div class="stage-grid"><div class="fact-card good"><h4>생존자 바이트 불변</h4><p>생존자 토픽은 절대 재작성하지 않습니다. 모델이 만든 replacement body가 디스크에 기록되는 경로는 없습니다.</p></div><div class="fact-card warn"><h4>삭제가 아니라 보존 이동</h4><p>하드 삭제는 없습니다. 중복 사본과 preimage는 <code>.trash</code>에 남고 자동 정리되지 않습니다.</p></div><div class="fact-card"><h4>유효 완료 후 batched 제안 기록</h4><p><code>applied</code> 또는 <code>report-only</code>로 유효하게 완료된 뒤 모든 non-KEEP report-only operation을 한 번의 lock · read · write batch로 namespace의 <code>suggestions.json</code>에 기록합니다. dry-run, stale, timeout, validation failure에는 기록하지 않습니다.</p></div><div class="fact-card"><h4>콘텐츠 주소 기반 중복 제거와 preview</h4><p>fingerprint는 kind, reason, <strong>모든</strong> 정렬 source와 source hash, destination, replacement 내용을 포함합니다. inbox에는 본문과 description 없이 결정론적 source preview 최대 2개와 정확한 <code>sourceCount</code>, destination, 정확한 <code>run_id</code> / <code>operation_id</code>를 저장합니다. locator로 해당 run report의 전체 operation을 해석하며 inbox는 최대 200개, 512 KiB입니다.</p></div></div>
             </div>
           </div>
           <div class="exit-link" aria-hidden="true"></div>
@@ -1739,18 +1739,21 @@ $CONFIG_ROOT/skills/memory-types/SKILL.md → <span class="file" data-config-ass
             <div><h3 id="seq2-title">메모리 주입</h3><p>포인터와 최대 3개 제안 메타데이터를 bounded 단일 시스템 블록으로 끝에 추가</p></div>
             <span class="pill read">read path</span>
           </div>
-          <div class="participants"><span class="participant">OpenCode</span><span class="participant">experimental.chat.system.transform</span><span class="participant">classifier</span><span class="participant">project + global indexes</span><span class="participant">suggestions.json</span><span class="participant">output.system</span></div>
+          <div class="participants"><span class="participant">OpenCode</span><span class="participant">experimental.chat.system.transform</span><span class="participant">classifier</span><span class="participant">global → project indexes</span><span class="participant">suggestions.json</span><span class="participant">output.system</span></div>
           <div class="steps">
             <div class="step"><strong>OpenCode</strong><span>chat system transform 요청</span></div>
             <div class="step"><strong>transform hook</strong><span><code>experimental.chat.system.transform</code></span></div>
+            <div class="step gate"><strong>initial sentinel check</strong><span>이미 exact first-line sentinel이 있으면 즉시 종료</span></div>
             <div class="step gate"><strong>classifySession</strong><span>child면 skip · primary/unknown 진행</span></div>
-            <div class="step async"><strong>parallel read</strong><span>project + global indexes</span></div>
-            <div class="step gate"><strong>예산 적용</strong><span>newest-first 포인터 선택</span></div>
-            <div class="step gate"><strong>sentinel 확인</strong><span>exact first-line match dedupe</span></div>
-            <div class="step gate"><strong>verified primary?</strong><span>primary만 namespace inbox claim · child/unknown은 제안 소비 안 함</span></div>
-            <div class="step write"><strong>fit-aware claim(3)</strong><span>빈 inbox는 lock 없이 종료 · oldest-first prefix 중 실제 block에 들어가는 최대 묶음만 소비 · contention은 즉시 실패</span></div>
-            <div class="step gate"><strong>bounded render</strong><span>정확한 run_id + operation_id를 보존하고 reason · source refs/count · destination 힌트만 <code>~</code> 표기로 축약</span></div>
-            <div class="step"><strong>output.system.push</strong><span>단일 combined block · <code>splice</code> 아님</span></div>
+            <div class="step async"><strong>global index read</strong><span>먼저 읽음 · 실패하면 주입 생략</span></div>
+            <div class="step async"><strong>project index read</strong><span>그 다음 읽음 · 실패/unavailable이면 empty project</span></div>
+            <div class="step gate"><strong>second sentinel check</strong><span>index read 동안 sibling transform이 예약했으면 종료</span></div>
+            <div class="step"><strong>ordinary block reservation</strong><span>newest-first pointer 예산 적용 후 <code>output.system.push</code> 즉시 실행 · array slot 보존</span></div>
+            <div class="step gate"><strong>verified primary?</strong><span>primary만 suggestion path 진행 · child/unknown은 ordinary block 유지</span></div>
+            <div class="step async"><strong>optimistic inbox read</strong><span>empty inbox는 lock 없이 종료</span></div>
+            <div class="step write"><strong>fit-aware fail-fast claim(3)</strong><span>lock 아래 재읽기 · oldest-first prefix 중 전체가 block에 들어가는 최대 묶음만 소비 · contention은 즉시 실패</span></div>
+            <div class="step gate"><strong>bounded render</strong><span>결정론적 source preview 최대 2개 + 정확한 sourceCount · run_id · operation_id</span></div>
+            <div class="step"><strong>reserved slot replace</strong><span>같은 array index를 suggestion-bearing combined block으로 교체</span></div>
           </div>
           <div class="annotation-grid">
             <div class="annotation"><strong>budget</strong>total ≤ 10KB · pointers ≈ 8KB</div>
@@ -1758,9 +1761,9 @@ $CONFIG_ROOT/skills/memory-types/SKILL.md → <span class="file" data-config-ass
             <div class="annotation"><strong>density</strong>약 80 pointer lines · newest-first</div>
             <div class="annotation"><strong>sentinel</strong><code>&lt;!-- opencode-memory:v2 --&gt;</code></div>
             <div class="annotation"><strong>cache</strong><code>push</code>로 기존 prompt cache 순서 보존</div>
-            <div class="annotation"><strong>suggestions</strong>namespace-local · oldest-first 최대 3개 · 전달은 best-effort</div>
-            <div class="annotation"><strong>exact locator</strong><code>runs/&lt;run_id&gt;/report.md</code>의 <code>REPORT &lt;operation_id&gt;</code>로 원본 제안을 찾음</div>
-            <div class="annotation"><strong>bounded metadata</strong>renderer가 retained suggestion 수를 반환하고 claim은 모두 표시되는 prefix만 제거 · advisory field 축약은 <code>~</code>로 표시</div>
+            <div class="annotation"><strong>suggestions</strong>namespace-local · oldest-first 최대 3개 · fit-aware 전달은 best-effort</div>
+            <div class="annotation"><strong>exact locator</strong>정확한 <code>run_id</code> + <code>operation_id</code>로 namespace run report의 전체 operation을 찾음</div>
+            <div class="annotation"><strong>bounded metadata</strong>두 source preview만 표시하되 <code>source_count</code>는 전체 source 수를 정확히 보존 · claim은 모두 표시되는 prefix만 제거</div>
             <div class="annotation"><strong>failure</strong>index read는 기존 fail-open 규칙 유지 · inbox read/lock 실패 시 포인터 블록은 그대로 주입</div>
           </div>
         </article>
@@ -1796,7 +1799,7 @@ $CONFIG_ROOT/skills/memory-types/SKILL.md → <span class="file" data-config-ass
             <div class="step write"><strong>applied manifest</strong><span>commit marker</span></div>
             <div class="step write"><strong>state complete</strong><span>lease 해제 · inventory 갱신</span></div>
             <div class="step"><strong>report / diff</strong><span><code>report.md</code> · <code>diff.md</code></span></div>
-            <div class="step write"><strong>record suggestions</strong><span>valid applied/report-only 완료 뒤 non-KEEP report-only operation을 namespace inbox에 dedupe</span></div>
+            <div class="step write"><strong>record suggestions batch</strong><span>valid applied/report-only 완료 뒤 모든 actionable report-only operation을 한 lock · read · write로 dedupe</span></div>
             <div class="step"><strong>toast</strong><span>완료 상태 알림</span></div>
           </div>
           <div class="annotation-grid">
