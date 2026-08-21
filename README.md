@@ -248,6 +248,7 @@ Any runtime change that alters tool arguments, success fields, public errors, vi
 
 Automatic apply is limited to a locally proven `duplicate-exact` `MERGE`. Semantic similarity, stale-content judgments, and every other non-exact proposal are report-only. Curation never hard-deletes memory files. Before an applied change, recoverable originals are archived under `.trash/<runId>/` in the relevant memory store.
 For `duplicate-exact`, exact means equality of parsed `type`, `description`, and `body` after parser-defined surrounding-whitespace normalization, not byte identity; internal content differences remain unsafe, while raw SHA-256 hashes still fence stale or tampered sources.
+Curator output is sparse: unchanged topics produce no `KEEP` operations. Valid non-exact operations are stored as metadata-only, namespace-local suggestions, deduplicated by operation content and source hashes, and up to three are consumed for the next verified primary-session injection. Delivery is best-effort and does not grant automatic semantic mutation authority.
 
 ## Architecture and dependency pin
 
