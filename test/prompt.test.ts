@@ -1,7 +1,15 @@
 import { describe, expect, test } from "bun:test"
-import { MEMORY_BLOCK_MAX_BYTES, MEMORY_BLOCK_SENTINEL, buildSystemBlock, injectInto } from "../src/prompt"
+import { MEMORY_BLOCK_MAX_BYTES, MEMORY_BLOCK_SENTINEL, buildSystemBlock, injectInto, type InjectableSuggestion } from "../src/prompt"
 
 const EMPTY_INDEX = { content: "", truncated: false } as const
+const SUGGESTION: InjectableSuggestion = {
+  kind: "REWRITE",
+  reasonCode: "stale-detail",
+  sourceSlugs: ["project:alpha", "global:beta", "project:gamma"],
+  sourceCount: 5,
+  destination: { scope: "project", slug: "current-detail" },
+  locator: "0123456789ab",
+}
 
 function indexes(projectContent: string, globalContent: string) {
   return {
@@ -55,6 +63,69 @@ describe("buildSystemBlock", () => {
 
   test("empty indexes omit code fences", () => {
     expect(buildSystemBlock({ project: EMPTY_INDEX, global: EMPTY_INDEX })).not.toContain("```")
+  })
+
+  test("renders only bounded structural suggestion metadata", () => {
+    // Given suggestion metadata with fields longer than their prompt limits
+    const suggestion: InjectableSuggestion = {
+      ...SUGGESTION,
+      reasonCode: `reason-${"r".repeat(100)}`,
+      sourceSlugs: ["project:alpha", "global:beta", "project:gamma", "global:filesystem-secret"],
+      destination: { scope: "global", slug: `destination-${"d".repeat(100)}` },
+      locator: "0123456789abcdef0123456789abcdef",
+    }
+
+    // When the memory block is rendered
+    const block = buildSystemBlock({ project: EMPTY_INDEX, global: EMPTY_INDEX }, undefined, [suggestion])
+    const line = block.split("\n").find((candidate) => candidate.startsWith("- kind="))
+
+    // Then the machine-readable line carries only constrained metadata
+    expect(line).toBeDefined()
+    expect(line).toContain("kind=REWRITE")
+    expect(line).toContain("source_count=5")
+    expect(line).toContain("sources=project:alpha,global:beta")
+    expect(line).not.toContain("project:gamma")
+    expect(line).not.toContain("filesystem-secret")
+    expect(line).not.toContain("0123456789abcdef")
+    expect(Buffer.byteLength(line ?? "", "utf8")).toBeLessThanOrEqual(240)
+  })
+
+  test("trims pointers before suggestion lines to honor the whole-block byte cap", () => {
+    // Given pointers that fill the configured block and three suggestions
+    const pointers = Array.from({ length: 80 }, (_, index) => `- [p-${index}](p-${index}.md) — ${"p".repeat(80)}`).join("\n")
+    const config = { maxBlockBytes: 2_048, pointerBudgetBytes: 8_000, pointerMaxLines: 80, projectShare: 0.6 }
+
+    // When the bounded block is rendered
+    const block = buildSystemBlock(indexes(pointers, pointers), config, [SUGGESTION, SUGGESTION, SUGGESTION])
+
+    // Then pointer pressure is removed first and the final block remains bounded
+    expect(Buffer.byteLength(block, "utf8")).toBeLessThanOrEqual(config.maxBlockBytes)
+    expect(block.split("\n").filter((line) => line.startsWith("- kind=")).length).toBe(3)
+    expect(block.split("\n").filter((line) => line.startsWith("- [p-")).length).toBeLessThan(160)
+  })
+
+  test("renders three worst-case schema-valid suggestions within the minimum block budget without pointers", () => {
+    // Given three suggestions at every persisted metadata maximum
+    const maximal: InjectableSuggestion = {
+      kind: "REWRITE",
+      reasonCode: `r${"e".repeat(99)}`,
+      sourceSlugs: Array.from({ length: 200 }, () => `project:${"s".repeat(100)}`),
+      sourceCount: 200,
+      destination: { scope: "project", slug: "d".repeat(100) },
+      locator: "f".repeat(64),
+    }
+    const config = { maxBlockBytes: 2_048, pointerBudgetBytes: 512, pointerMaxLines: 1, projectShare: 0.6 }
+
+    // When the pointer-free block is rendered at the supported minimum budget
+    const truncatedEmptyIndex = { content: "", truncated: true } as const
+    const block = buildSystemBlock({ project: truncatedEmptyIndex, global: truncatedEmptyIndex }, config, [maximal, maximal, maximal])
+    const suggestionLines = block.split("\n").filter((line) => line.startsWith("- kind="))
+
+    // Then all claimed suggestions fit and each source remains scope-qualified
+    expect(Buffer.byteLength(block, "utf8")).toBeLessThanOrEqual(2_048)
+    expect(suggestionLines).toHaveLength(3)
+    expect(suggestionLines.every((line) => line.includes("sources=project:"))).toBe(true)
+    expect(block).not.toContain("- [")
   })
 })
 
