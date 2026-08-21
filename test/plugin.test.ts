@@ -122,7 +122,8 @@ describe("memory injection", () => {
       key: `${index}`.repeat(64), runId: `run-${index}`, operationId: `operation-${index}`,
       kind: "REWRITE" as const,
       reasonCode: "stale-detail",
-      sources: [{ scope: "project" as const, slug: `source-${index}`, sha256: "a".repeat(64) }],
+      sourcePreview: [{ scope: "project" as const, slug: `source-${index}` }],
+      sourceCount: 1,
       destination: { scope: "project" as const, slug: `destination-${index}` },
       createdAt: index, updatedAt: index,
     }))

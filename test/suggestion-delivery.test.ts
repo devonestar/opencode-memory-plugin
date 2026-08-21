@@ -27,7 +27,8 @@ describe("suggestion delivery", () => {
       key: "a".repeat(64), runId: "run", operationId: "operation",
       kind: "REWRITE" as const,
       reasonCode: "stale-detail",
-      sources: [{ scope: "project" as const, slug: "source", sha256: "b".repeat(64) }],
+      sourcePreview: [{ scope: "project" as const, slug: "source" }],
+      sourceCount: 1,
       destination: { scope: "project" as const, slug: "destination" },
       createdAt: 1, updatedAt: 1,
     }
@@ -57,6 +58,41 @@ describe("suggestion delivery", () => {
     expect(claims).toBe(1)
     expect(system).toHaveLength(1)
     expect(system[0]).toContain("sources=project:source")
+  })
+
+  test("renders the deterministic preview and exact count for a 201-source suggestion", async () => {
+    // Given one persisted suggestion created from 201 reverse-ordered sources
+    const globalDir = join(dir, "global")
+    const projectDir = join(dir, "project")
+    await Promise.all([mkdir(globalDir, { recursive: true }), mkdir(projectDir, { recursive: true })])
+    const repository = createCurationSuggestionRepository(globalDir, "namespace")
+    const sources = Array.from({ length: 201 }, (_, index) => ({
+      scope: index % 2 === 0 ? "global" as const : "project" as const,
+      slug: `topic-${String(index).padStart(3, "0")}`,
+      sha256: index.toString(16).padStart(64, "0"),
+    })).reverse()
+    await repository.add({ runId: "run", operation: {
+      id: "many-sources",
+      kind: "REWRITE",
+      confidence: "high",
+      reasonCode: "description-shape",
+      sources,
+      replacement: { scope: "project", slug: "destination", type: "project", description: "description", body: "body" },
+    }, at: 1 })
+    const system: string[] = []
+
+    // When primary injection delivers the suggestion
+    await injectMemoryForSession({
+      globalStore: { kind: "ready", store: createStore(globalDir) },
+      projectStore: { kind: "ready", store: createStore(projectDir) },
+      classifySession: async () => "primary",
+      suggestionRepository: repository,
+    }, "primary", system)
+
+    // Then the rendered metadata carries the two-item preview and full source count
+    const line = system[0]?.split("\n").find((candidate) => candidate.startsWith("- kind="))
+    expect(line).toContain("sources=global:topic-000,global:topic-002")
+    expect(line).toContain("source_count=201")
   })
 
   test("consumes only suggestions whose exact report locators fit the rendered block", async () => {
