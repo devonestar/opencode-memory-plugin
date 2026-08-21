@@ -146,8 +146,8 @@ function injectableSuggestions(suggestions: readonly CurationSuggestion[]): read
   return suggestions.map((suggestion) => ({
     kind: suggestion.kind,
     reasonCode: suggestion.reasonCode,
-    sourceSlugs: suggestion.sources.map((source) => `${source.scope}:${source.slug}`),
-    sourceCount: suggestion.sources.length,
+    sourceSlugs: suggestion.sourcePreview.map((source) => `${source.scope}:${source.slug}`),
+    sourceCount: suggestion.sourceCount,
     destination: suggestion.destination,
     runId: suggestion.runId,
     operationId: suggestion.operationId,
