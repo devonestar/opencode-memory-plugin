@@ -45,7 +45,7 @@ async function duplicateValidation() {
 }
 
 describe("safe curation apply", () => {
-  test("records a report-only no-op without locking stores or creating restore material", async () => {
+  test("records a report-only result without locking stores or creating restore material", async () => {
     await writeTopic(stores, { scope: "global", slug: "reviewed" })
     const before = await testSnapshot(stores)
     const operation = { id: "semantic", kind: "DELETE", confidence: "high", reasonCode: "ephemeral-state", sources: [source(before, "global", "reviewed")] }
@@ -54,7 +54,7 @@ describe("safe curation apply", () => {
 
     const result = await applyValidatedProposal({ runId: "run-1", runDir, stores, snapshot: before, validation, config: DEFAULT_CURATION_CONFIG })
 
-    expect(result.status).toBe("no-op")
+    expect(result.status).toBe("report-only")
     expect((await testSnapshot(stores)).sha256).toBe(before.sha256)
     await expect(access(join(stores.global, ".trash", "run-1"))).rejects.toBeDefined()
     const manifest = JSON.parse(await readFile(join(runDir, "manifest.json"), "utf8")) as { readonly status?: unknown }

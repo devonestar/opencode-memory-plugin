@@ -25,7 +25,7 @@ export type ApplyInput = {
 
 export type ApplyResult =
   | { readonly status: "applied"; readonly postSnapshot: MemorySnapshot; readonly reportPath: string }
-  | { readonly status: "no-op" | "stale" | "validation-failed"; readonly reportPath: string }
+  | { readonly status: "report-only" | "stale" | "validation-failed"; readonly reportPath: string }
 
 
 function manifestFor(input: ApplyInput, status: RunManifest["status"]): RunManifest {
@@ -59,10 +59,10 @@ export async function applyValidatedProposal(input: ApplyInput): Promise<ApplyRe
     const manifest = manifestFor(input, "report-only")
     await Promise.all([
       writeManifest(input.stores.global, input.runDir, manifest),
-      writeJournal(input.stores.global, input.runDir, [{ phase: "no-op", at: clock() }]),
+      writeJournal(input.stores.global, input.runDir, [{ phase: "report-only", at: clock() }]),
       writeReports(input.stores.global, { dir: input.runDir, id: input.runId, status: "report-only" }, { snapshot: input.snapshot, validation: input.validation }),
     ])
-    return { status: "no-op", reportPath: manifest.reportPath }
+    return { status: "report-only", reportPath: manifest.reportPath }
   }
   return withStoreLocks(input.stores, async () => {
     const current = await captureSnapshot(input.stores, input.config)
