@@ -1,9 +1,10 @@
 import { tool } from "@opencode-ai/plugin"
 import { INDEX_MAX_BYTES, INDEX_TARGET_RATIO } from "./config"
+import type { CurationSuggestionRepository } from "./curation-suggestions"
 import { MEMORY_TYPES } from "./frontmatter"
 import { isSafeDescription, MEMORY_SCOPES, type MemoryScope, SaveGateError, validateSaveInput } from "./gate"
 import { DEFAULT_INJECTION_CONFIG, type InjectionConfig } from "./injection-config"
-import { injectInto } from "./prompt"
+import { buildSystemBlock, hasMemoryBlock, type InjectableSuggestion } from "./prompt"
 import { PathContainmentError, type MemoryStore, type SaveOutcome } from "./store"
 
 export type SessionClassification = "primary" | "child" | "unknown"
@@ -26,9 +27,11 @@ export type MemoryRuntime = {
   readonly globalStore: ScopeStoreAccess
   readonly projectStore: ProjectStoreAccess
   readonly classifySession: ClassifySession
+  readonly suggestionRepository?: Pick<CurationSuggestionRepository, "claim">
 }
 
 const EMPTY_INDEX = { content: "", truncated: false } as const
+const SUGGESTION_DELIVERY_LIMIT = 3
 
 type StoreSelection =
   | { readonly kind: "ready"; readonly target: MemoryStore; readonly other?: MemoryStore; readonly otherScope?: MemoryScope }
@@ -117,6 +120,7 @@ export async function injectMemoryForSession(
   system: string[],
   config: InjectionConfig = DEFAULT_INJECTION_CONFIG,
 ): Promise<void> {
+  if (hasMemoryBlock(system)) return
   const classification = await runtime.classifySession(sessionID)
   // Unknown reads fail open: ~2KB of extra context is cheaper than silently disabling memory; confirmed children remain excluded.
   if (classification === "child") return
@@ -125,7 +129,22 @@ export async function injectMemoryForSession(
   if (global === null) return
   const project =
     runtime.projectStore.kind === "ready" ? await runtime.projectStore.store.readIndexForInjection().catch(() => EMPTY_INDEX) : EMPTY_INDEX
-  injectInto(system, { project, global }, config)
+  if (hasMemoryBlock(system)) return
+  const indexes = { project, global }
+  const reservationIndex = system.length
+  system.push(buildSystemBlock(indexes, config))
+  if (classification !== "primary" || runtime.suggestionRepository === undefined) return
+  const claimed = await runtime.suggestionRepository.claim(SUGGESTION_DELIVERY_LIMIT).catch(() => null)
+  if (claimed === null) return
+  const suggestions: readonly InjectableSuggestion[] = claimed.map((suggestion) => ({
+    kind: suggestion.kind,
+    reasonCode: suggestion.reasonCode,
+    sourceSlugs: suggestion.sources.map((source) => `${source.scope}:${source.slug}`),
+    sourceCount: suggestion.sources.length,
+    destination: suggestion.destination,
+    locator: suggestion.key,
+  }))
+  system[reservationIndex] = buildSystemBlock(indexes, config, suggestions)
 }
 
 function selectStores(runtime: MemoryRuntime, scope: MemoryScope): StoreSelection {

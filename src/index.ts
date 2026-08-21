@@ -3,6 +3,7 @@ import { basename } from "node:path"
 import { initializeMemoryRoots, initializeProjectStoreRoot, resolveProjectMemoryDir } from "./config"
 import { parseCurationOptions } from "./curation-config"
 import { createCurationRuntime } from "./curation-runtime"
+import { createCurationSuggestionRepository } from "./curation-suggestions"
 import { parseInjectionOptions } from "./injection-config"
 import { createLifecycleTools, type LifecycleToolRuntime } from "./lifecycle-tools"
 import { recoverLifecycleStore } from "./lifecycle-recovery"
@@ -37,7 +38,15 @@ const memoryPlugin: Plugin = async ({ project, client, directory }, options) => 
     const response = await client.session.get({ path: { id: sessionID } })
     return response.data
   })
-  const runtime = { globalStore, projectStore, classifySession }
+  const suggestionRepository = globalStore.kind === "ready" && projectStore.kind === "ready"
+    ? createCurationSuggestionRepository(globalStore.store.dir, basename(projectStore.store.dir))
+    : undefined
+  const runtime = {
+    globalStore,
+    projectStore,
+    classifySession,
+    ...(suggestionRepository === undefined ? {} : { suggestionRepository }),
+  }
   const memorySave = createMemorySaveTool(runtime)
   const memoryRecall = createMemoryRecallTool(runtime)
   const globalLifecycle: LifecycleToolRuntime["global"] = globalStore.kind === "ready"

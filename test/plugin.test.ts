@@ -115,6 +115,69 @@ describe("memory_save scope", () => {
 })
 
 describe("memory injection", () => {
+  test("claims at most three suggestions only for a verified primary session", async () => {
+    // Given a primary runtime with four ordered suggestions
+    const claimedLimits: number[] = []
+    const entries = Array.from({ length: 4 }, (_, index) => ({
+      key: `${index}`.repeat(64), runId: `run-${index}`, operationId: `operation-${index}`,
+      kind: "REWRITE" as const,
+      reasonCode: "stale-detail",
+      sources: [{ scope: "project" as const, slug: `source-${index}`, sha256: "a".repeat(64) }],
+      destination: { scope: "project" as const, slug: `destination-${index}` },
+      createdAt: index, updatedAt: index,
+    }))
+    const system: string[] = []
+
+    // When memory injection runs
+    await injectMemoryForSession({
+      globalStore: { kind: "ready", store: createStore(join(dir, "global")) }, projectStore: { kind: "ready", store: createStore(join(dir, "project")) },
+      classifySession: async () => "primary",
+      suggestionRepository: {
+        claim: async (limit: number) => { claimedLimits.push(limit); return entries.slice(0, limit) },
+      },
+    }, "primary", system)
+
+    // Then only the fixed oldest batch is requested and rendered
+    expect(claimedLimits).toEqual([3])
+    expect(system[0]?.split("\n").filter((line) => line.startsWith("- kind=")).length).toBe(3)
+    expect(system[0]).not.toContain("destination-3")
+  })
+
+  test("does not claim another batch when the sentinel already exists", async () => {
+    // Given an already injected system prompt
+    let claims = 0
+    const system = [`${MEMORY_BLOCK_SENTINEL}\nexisting block`]
+
+    // When the transform path is invoked again
+    await injectMemoryForSession({
+      globalStore: { kind: "ready", store: createStore(join(dir, "global")) }, projectStore: { kind: "ready", store: createStore(join(dir, "project")) },
+      classifySession: async () => "primary",
+      suggestionRepository: { claim: async () => { claims += 1; return [] } },
+    }, "primary", system)
+
+    // Then the existing block suppresses inbox consumption
+    expect(claims).toBe(0)
+    expect(system).toHaveLength(1)
+  })
+
+  test("fails open to ordinary pointer injection when suggestion claiming fails", async () => {
+    // Given a primary runtime whose suggestion inbox is unreadable
+    const globalStore = createStore(join(dir, "global"))
+    await globalStore.save({ type: "user", slug: "retained-pointer", description: "retained pointer", body: "This pointer remains injectable." })
+    const system: string[] = []
+
+    // When suggestion claiming fails during injection
+    await injectMemoryForSession({
+      globalStore: { kind: "ready", store: globalStore }, projectStore: { kind: "ready", store: createStore(join(dir, "project")) },
+      classifySession: async () => "primary",
+      suggestionRepository: { claim: async () => { throw new TypeError("inbox read failed") } },
+    }, "primary", system)
+
+    // Then the ordinary memory block still includes its pointer
+    expect(system[0]).toContain("](retained-pointer.md)")
+    expect(system[0]?.split("\n").some((line) => line.startsWith("- kind="))).toBe(false)
+  })
+
   test("injects global pointers with an empty project section when the project store is unavailable", async () => {
     // Given a readable global store and an unavailable project namespace
     const globalStore = createStore(join(dir, "global"))
@@ -170,13 +233,17 @@ describe("memory injection", () => {
   test("injects memory when session classification is unknown", async () => {
     // Given an unclassifiable session with readable stores
     const system: string[] = []
+    let claims = 0
+    const globalStore = createStore(join(dir, "global"))
+    await globalStore.save({ type: "user", slug: "unknown-pointer", description: "unknown pointer", body: "Unknown sessions retain ordinary pointers." })
 
     // When memory injection runs
     await injectMemoryForSession(
       {
-        globalStore: { kind: "ready", store: createStore(join(dir, "global")) },
+        globalStore: { kind: "ready", store: globalStore },
         projectStore: { kind: "ready", store: createStore(join(dir, "project")) },
         classifySession: async () => "unknown",
+        suggestionRepository: { claim: async () => { claims += 1; return [] } },
       },
       undefined,
       system,
@@ -184,6 +251,8 @@ describe("memory injection", () => {
 
     // Then the optional read path fails open
     expect(system[0]?.split("\n", 1)[0]).toBe(MEMORY_BLOCK_SENTINEL)
+    expect(system[0]).toContain("](unknown-pointer.md)")
+    expect(claims).toBe(0)
   })
 })
 
@@ -213,6 +282,7 @@ describe("session suppression", () => {
       globalStore: { kind: "ready", store: createStore(join(dir, "global")) } as const,
       projectStore: { kind: "ready", store: createStore(join(dir, "project")) } as const,
       classifySession: async () => "child" as const,
+      suggestionRepository: { claim: async () => { throw new TypeError("child claimed suggestions") } },
     }
     const system: string[] = []
 
