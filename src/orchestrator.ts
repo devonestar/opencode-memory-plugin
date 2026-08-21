@@ -11,6 +11,7 @@ import { recoverStartup, type RecoveredRuntime } from "./startup-recovery"
 import { captureSnapshot, type CurationStores, type MemorySnapshot } from "./snapshot"
 import type { CurationConfig } from "./curation-config"
 import { evaluateEligibility, snapshotInventory, type Eligibility } from "./trigger"
+import { createCurationSuggestionRepository, curationOutcomeSummary, recordCurationSuggestions } from "./curation-suggestions"
 
 export type { CurationClient, CurationService, CurationServiceInput, CurationSession, CurationStatus, ScheduledTimeout } from "./curation-service-types"
 
@@ -44,6 +45,7 @@ export function createCurationService(input: CurationServiceInput): CurationServ
   const createOwnerToken = input.createOwnerToken ?? randomUUID
   const capture = (stores: CurationStores, config: CurationConfig): Promise<MemorySnapshot> => captureSnapshot(stores, config, input.snapshotFault)
   const repository = createCurationRepository(input.globalDir, input.namespace)
+  const suggestions = createCurationSuggestionRepository(input.globalDir, input.namespace)
   const pending = new Set<Promise<void>>()
   const aborted = new Set<string>()
   let runtime: ActiveRuntime | undefined
@@ -83,7 +85,7 @@ export function createCurationService(input: CurationServiceInput): CurationServ
     if (active === undefined) return
     if (active.childSessionID !== undefined) await abortOnce(active.childSessionID)
     await completeFailure(active, snapshot, "timeout", `curator exceeded ${input.config.timeoutSeconds} seconds`)
-    await notify(`Memory curation ${runId} timed out; see its report.`)
+    await notify(`Memory curation ${runId} timed out; ${curationOutcomeSummary(0, 0)}; see its report.`)
   }
 
   const ready = recoverStartup({ repository, client: input.client, stores: input.stores, globalDir: input.globalDir, config: input.config, clock, scheduler, abortOnce, timeout })
@@ -145,15 +147,20 @@ export function createCurationService(input: CurationServiceInput): CurationServ
         const manifest = await writeReviewArtifacts(input.globalDir, runDir, active.runId, activeRuntime.snapshot, validation, status, clock())
         clearRuntime(active.runId)
         await repository.complete(active.runId, active.ownerToken, { runId: active.runId, status, at: clock(), reportPath: manifest.reportPath }, status === "dry-run" ? { at: clock(), inventory: snapshotInventory(activeRuntime.snapshot) } : undefined)
-        await notify(`Memory curation ${active.runId} completed as ${status}; see ${manifest.reportPath}.`)
+        await notify(`Memory curation ${active.runId} completed as ${status}; ${curationOutcomeSummary(0, 0)}; see ${manifest.reportPath}.`)
         return
       }
       const applied = await applyValidatedProposal({ runId: active.runId, runDir, stores: input.stores, snapshot: activeRuntime.snapshot, validation, config: input.config, clock, ...(input.applyFault === undefined ? {} : { fault: input.applyFault }) })
       committed = applied.status === "applied"
       clearRuntime(active.runId)
-      const successSnapshot = applied.status === "applied" ? applied.postSnapshot : applied.status === "no-op" ? activeRuntime.snapshot : undefined
+      const successSnapshot = applied.status === "applied" ? applied.postSnapshot : applied.status === "report-only" ? activeRuntime.snapshot : undefined
       await repository.complete(active.runId, active.ownerToken, { runId: active.runId, status: applied.status, at: clock(), reportPath: applied.reportPath }, successSnapshot === undefined ? undefined : { at: clock(), inventory: snapshotInventory(successSnapshot) })
-      await notify(`Memory curation ${active.runId} completed as ${applied.status}; see ${applied.reportPath}.`)
+      let recorded = 0
+      if (applied.status === "applied" || applied.status === "report-only") {
+        try { recorded = await recordCurationSuggestions(suggestions, { runId: active.runId, operations: validation.reportOnly, at: clock() }) }
+        catch (error) { if (!(error instanceof Error)) throw error; await repository.recordError(`curation suggestion recording failed: ${error.message}`, clock()).catch(() => undefined) }
+      }
+      await notify(`Memory curation ${active.runId} completed as ${applied.status}; ${curationOutcomeSummary(recorded, applied.status === "applied" ? validation.applicable.length : 0)}; see ${applied.reportPath}.`)
     } catch (error) {
       if (input.applyFault !== undefined) throw error
       if (!(error instanceof Error)) throw error
