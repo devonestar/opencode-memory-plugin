@@ -200,7 +200,6 @@ export function validateProposal(proposal: CurationProposal, snapshot: MemorySna
   for (const topic of snapshot.topics) {
     const topicKey = key(topic.scope, topic.slug)
     const count = coverage.get(topicKey) ?? 0
-    if (count === 0) errors.push(`snapshot topic omitted from operation sources: ${topicKey}`)
     if (count > 1) errors.push(`snapshot topic repeated across operation sources: ${topicKey}`)
   }
   const resulting = new Map(snapshot.topics.map((topic) => [key(topic.scope, topic.slug), topic.bytes]))

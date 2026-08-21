@@ -155,6 +155,7 @@ describe("safe automatic operation policy", () => {
     const description = "identical durable fact"
     const body = "This exact durable body appears in both memory scopes."
     await writeTopic(stores, { scope: "global", slug: "first", description, body })
+    await writeTopic(stores, { scope: "global", slug: "unrelated" })
     await writeTopic(stores, { scope: "project", slug: "second", description, body })
     const snapshot = await testSnapshot(stores)
     const operation = {
@@ -195,7 +196,7 @@ describe("safe automatic operation policy", () => {
     }
   })
 
-  test("requires every snapshot topic to occur exactly once across all operation sources", async () => {
+  test("accepts omitted snapshot topics but rejects a source repeated across operations", async () => {
     await writeTopic(stores, { scope: "global", slug: "alpha" })
     await writeTopic(stores, { scope: "project", slug: "beta" })
     const snapshot = await testSnapshot(stores)
@@ -206,9 +207,9 @@ describe("safe automatic operation policy", () => {
     const repeated = validateProposal(parseProposal(JSON.stringify(proposal(snapshot, [keep, { ...keep, id: "again" }]))), snapshot, DEFAULT_CURATION_CONFIG)
     const empty = validateProposal(parseProposal(JSON.stringify(proposal(snapshot, []))), snapshot, DEFAULT_CURATION_CONFIG)
 
-    expect(omitted.errors.join(" ")).toContain("omitted")
+    expect(omitted.errors).toEqual([])
     expect(repeated.errors.join(" ")).toContain("repeated")
-    expect(empty.errors.join(" ")).toContain("omitted")
+    expect(empty.errors).toEqual([])
   })
 
   test.each(["line one\nline two", "line one\rline two", "line\0nul", "escape ``` fence"]) (
