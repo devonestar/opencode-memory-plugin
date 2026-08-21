@@ -28,6 +28,6 @@ describe("isolated process restart", () => {
     const recovered = await phase("recover")
 
     expect(recovered["active"]).toBeUndefined()
-    expect(recovered["lastResult"]).toHaveProperty("status", "no-op")
+    expect(recovered["lastResult"]).toHaveProperty("status", "report-only")
   })
 })

@@ -115,7 +115,7 @@ describe("persisted curation fencing", () => {
     await restarted.waitForBackgroundWork()
 
     expect((await restarted.status()).active).toBeUndefined()
-    expect((await restarted.status()).lastResult?.status).toBe("no-op")
+    expect((await restarted.status()).lastResult?.status).toBe("report-only")
   })
 
   test("startup terminally times out an expired active child without another event", async () => {
