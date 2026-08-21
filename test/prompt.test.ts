@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test"
-import { MEMORY_BLOCK_MAX_BYTES, MEMORY_BLOCK_SENTINEL, buildSystemBlock, injectInto, type InjectableSuggestion } from "../src/prompt"
+import { MEMORY_BLOCK_MAX_BYTES, MEMORY_BLOCK_SENTINEL, buildSystemBlock, buildSystemBlockResult, injectInto, type InjectableSuggestion } from "../src/prompt"
 
 const EMPTY_INDEX = { content: "", truncated: false } as const
 const SUGGESTION: InjectableSuggestion = {
@@ -8,7 +8,8 @@ const SUGGESTION: InjectableSuggestion = {
   sourceSlugs: ["project:alpha", "global:beta", "project:gamma"],
   sourceCount: 5,
   destination: { scope: "project", slug: "current-detail" },
-  locator: "0123456789ab",
+  runId: "run-0123456789ab",
+  operationId: "operation-0123456789ab",
 }
 
 function indexes(projectContent: string, globalContent: string) {
@@ -70,9 +71,10 @@ describe("buildSystemBlock", () => {
     const suggestion: InjectableSuggestion = {
       ...SUGGESTION,
       reasonCode: `reason-${"r".repeat(100)}`,
-      sourceSlugs: ["project:alpha", "global:beta", "project:gamma", "global:filesystem-secret"],
+      sourceSlugs: [`project:alpha-${"s".repeat(100)}`, "global:beta", "project:gamma", "global:filesystem-secret"],
       destination: { scope: "global", slug: `destination-${"d".repeat(100)}` },
-      locator: "0123456789abcdef0123456789abcdef",
+      runId: "run-0123456789abcdef0123456789abcdef",
+      operationId: "operation-0123456789abcdef0123456789abcdef",
     }
 
     // When the memory block is rendered
@@ -83,17 +85,20 @@ describe("buildSystemBlock", () => {
     expect(line).toBeDefined()
     expect(line).toContain("kind=REWRITE")
     expect(line).toContain("source_count=5")
-    expect(line).toContain("sources=project:alpha,global:beta")
+    expect(line).toContain("sources=project:alpha-s~,global:beta")
     expect(line).not.toContain("project:gamma")
     expect(line).not.toContain("filesystem-secret")
-    expect(line).not.toContain("0123456789abcdef")
-    expect(Buffer.byteLength(line ?? "", "utf8")).toBeLessThanOrEqual(240)
+    expect(line).toContain(`run_id=${suggestion.runId}`)
+    expect(line).toContain(`operation_id=${suggestion.operationId}`)
+    expect(line).toContain("reason=reason-rrrrrrr~")
+    expect(line).toContain("destination=global:destinat~")
+    expect(Buffer.byteLength(line ?? "", "utf8")).toBeLessThanOrEqual(360)
   })
 
   test("trims pointers before suggestion lines to honor the whole-block byte cap", () => {
     // Given pointers that fill the configured block and three suggestions
     const pointers = Array.from({ length: 80 }, (_, index) => `- [p-${index}](p-${index}.md) — ${"p".repeat(80)}`).join("\n")
-    const config = { maxBlockBytes: 2_048, pointerBudgetBytes: 8_000, pointerMaxLines: 80, projectShare: 0.6 }
+    const config = { maxBlockBytes: 2_500, pointerBudgetBytes: 8_000, pointerMaxLines: 80, projectShare: 0.6 }
 
     // When the bounded block is rendered
     const block = buildSystemBlock(indexes(pointers, pointers), config, [SUGGESTION, SUGGESTION, SUGGESTION])
@@ -112,7 +117,8 @@ describe("buildSystemBlock", () => {
       sourceSlugs: Array.from({ length: 200 }, () => `project:${"s".repeat(100)}`),
       sourceCount: 200,
       destination: { scope: "project", slug: "d".repeat(100) },
-      locator: "f".repeat(64),
+      runId: `r${"u".repeat(127)}`,
+      operationId: `o${"p".repeat(99)}`,
     }
     const config = { maxBlockBytes: 2_048, pointerBudgetBytes: 512, pointerMaxLines: 1, projectShare: 0.6 }
 
@@ -121,11 +127,33 @@ describe("buildSystemBlock", () => {
     const block = buildSystemBlock({ project: truncatedEmptyIndex, global: truncatedEmptyIndex }, config, [maximal, maximal, maximal])
     const suggestionLines = block.split("\n").filter((line) => line.startsWith("- kind="))
 
-    // Then all claimed suggestions fit and each source remains scope-qualified
+    // Then at least one worst-case suggestion fits and each retained source remains scope-qualified
     expect(Buffer.byteLength(block, "utf8")).toBeLessThanOrEqual(2_048)
-    expect(suggestionLines).toHaveLength(3)
+    expect(suggestionLines.length).toBeGreaterThanOrEqual(1)
     expect(suggestionLines.every((line) => line.includes("sources=project:"))).toBe(true)
     expect(block).not.toContain("- [")
+  })
+
+  test("reports how many candidate suggestions survived the whole-block budget", () => {
+    // Given three worst-case candidates at the minimum supported block budget
+    const maximal: InjectableSuggestion = {
+      kind: "REWRITE",
+      reasonCode: `r${"e".repeat(140)}`,
+      sourceSlugs: [`project:${"s".repeat(140)}`],
+      sourceCount: 1,
+      destination: { scope: "project", slug: `d${"e".repeat(140)}` },
+      runId: `r${"u".repeat(127)}`,
+      operationId: `o${"p".repeat(99)}`,
+    }
+    const config = { maxBlockBytes: 2_048, pointerBudgetBytes: 512, pointerMaxLines: 1, projectShare: 0.6 }
+
+    // When the internal renderer builds the bounded block
+    const result = buildSystemBlockResult({ project: EMPTY_INDEX, global: EMPTY_INDEX }, config, [maximal, maximal, maximal])
+
+    // Then callers can distinguish retained candidates from dropped candidates
+    expect(result.text).toBe(buildSystemBlock({ project: EMPTY_INDEX, global: EMPTY_INDEX }, config, [maximal, maximal, maximal]))
+    expect(result.retainedSuggestionCount).toBeGreaterThanOrEqual(1)
+    expect(result.retainedSuggestionCount).toBeLessThanOrEqual(3)
   })
 })
 
