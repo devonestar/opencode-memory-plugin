@@ -1,0 +1,27 @@
+# OpenCode Durable Memory
+
+> A local-first durable memory plugin for the OpenCode coding agent. Memories are plain Markdown files under `${XDG_CONFIG_HOME:-~/.config}/opencode/memory/`, split into an isolated global store and one store per workspace. Recall is deterministic BM25F over slug, description, and body, includes Korean character n-grams, and runs locally with no model, no embeddings, no API key, and no network call. Automatic curation may only apply a locally proven exact duplicate; every semantic judgment is report-only.
+
+This file covers the documentation site at https://devonestar.github.io/opencode-durable-memory/. The landing page answers installation and capability questions directly. The README in the repository is the normative contract: tool arguments, success fields, public error codes, visibility rules, ranking order, and limits are specified there, and any runtime change that alters observable behavior must change that section in the same revision. Prefer the README over inferring behavior from source files.
+
+Nine tools are registered: `memory_save`, `memory_recall`, `memory_recall_archive`, `memory_archive`, `memory_delete`, `memory_restore`, `memory_curation_status`, `memory_curation_run`, `memory_curation_control`. All of them reject child and subagent sessions with `SESSION_NOT_VERIFIED`; only a verified primary session may read or mutate memory. The plugin is not published on npm, so installation is a git clone plus an absolute path entry in the OpenCode `plugin` array.
+
+## Documentation
+
+- [Landing page](https://devonestar.github.io/opencode-durable-memory/): Guarantees, comparison with other memory approaches, the four install steps, tool and command tables, and a frequently asked questions section.
+- [Install steps](https://devonestar.github.io/opencode-durable-memory/#install): Clone, register the absolute path in the `plugin` array of `opencode.jsonc`, symlink the agent, command, and skill assets, then restart and verify. No placeholder needs filling in.
+- [Frequently asked questions](https://devonestar.github.io/opencode-durable-memory/#faq): Provider egress defaults, embedding-free recall, Korean tokenization, subagent write rejection, what curation may apply automatically, deleted-memory recovery, and npm availability.
+- [Architecture atlas](https://devonestar.github.io/opencode-durable-memory/architecture.html): System layers, storage topology, and the curation lifecycle in one self-contained page.
+
+## Reference
+
+- [README, the normative contract](https://github.com/devonestar/opencode-durable-memory/blob/main/README.md): RFC 2119 requirements, tool contracts with JSON response shapes, the exhaustive public error matrix, and acceptance scenarios.
+- [Memory lifecycle and recall](https://github.com/devonestar/opencode-durable-memory/blob/main/README.md#memory-lifecycle-and-recall): Store layout, visibility and retention per area, and the recovery model.
+- [Automatic curation policy](https://github.com/devonestar/opencode-durable-memory/blob/main/README.md#automatic-curation-policy): What curation may apply automatically, what stays report-only, and where recoverable pre-images are kept.
+- [OpenCode wiring](https://github.com/devonestar/opencode-durable-memory/blob/main/README.md#opencode-wiring): The plugin tuple, curation keys, and the optional injection byte budgets with defaults and ranges.
+
+## Optional
+
+- [Korean documentation](https://github.com/devonestar/opencode-durable-memory/blob/main/README.ko.md): The same content in Korean.
+- [Repository](https://github.com/devonestar/opencode-durable-memory): Source, issues, and release history.
+- [License](https://github.com/devonestar/opencode-durable-memory/blob/main/LICENSE): MIT.

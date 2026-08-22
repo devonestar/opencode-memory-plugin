@@ -1,0 +1,578 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>OpenCode Durable Memory — local-first agent memory with deterministic recall</title>
+  <meta name="description" content="A local-first memory plugin for the OpenCode coding agent. Memories are plain Markdown files, recall is deterministic BM25F with Korean n-grams, and automatic curation applies only provably exact duplicates. No database, no embeddings, no API key.">
+  <link rel="canonical" href="https://devonestar.github.io/opencode-durable-memory/">
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 1 1'/%3E">
+  <meta property="og:type" content="website">
+  <meta property="og:url" content="https://devonestar.github.io/opencode-durable-memory/">
+  <meta property="og:title" content="OpenCode Durable Memory — local-first agent memory with deterministic recall">
+  <meta property="og:description" content="A local-first memory plugin for the OpenCode coding agent. Memories are plain Markdown files, recall is deterministic BM25F with Korean n-grams, and automatic curation applies only provably exact duplicates. No database, no embeddings, no API key.">
+  <meta name="twitter:card" content="summary">
+  <meta name="twitter:title" content="OpenCode Durable Memory — local-first agent memory with deterministic recall">
+  <meta name="twitter:description" content="A local-first memory plugin for the OpenCode coding agent. Memories are plain Markdown files, recall is deterministic BM25F with Korean n-grams, and automatic curation applies only provably exact duplicates. No database, no embeddings, no API key.">
+  <script type="application/ld+json">
+  {
+    "@context": "https://schema.org",
+    "@type": "SoftwareSourceCode",
+    "name": "OpenCode Durable Memory",
+    "description": "A local-first memory plugin for the OpenCode coding agent. Memories are plain Markdown files, recall is deterministic BM25F with Korean n-grams, and automatic curation applies only provably exact duplicates. No database, no embeddings, no API key.",
+    "url": "https://devonestar.github.io/opencode-durable-memory/",
+    "codeRepository": "https://github.com/devonestar/opencode-durable-memory",
+    "programmingLanguage": "TypeScript",
+    "runtimePlatform": "Bun",
+    "license": "https://opensource.org/licenses/MIT",
+    "author": { "@type": "Person", "name": "devonestar" }
+  }
+  </script>
+  <script type="application/ld+json">
+  {
+    "@context": "https://schema.org",
+    "@type": "FAQPage",
+    "mainEntity": [
+      {
+        "@type": "Question",
+        "name": "Does this plugin send my memory to a model provider?",
+        "acceptedAnswer": {
+          "@type": "Answer",
+          "text": "Not unless you opt in. allowProviderEgress defaults to false, and while it is false every curation run is refused with the message that provider egress is disabled. Saving, recall, and the whole lifecycle path never contact a provider at all, so a default install keeps memory content on your own machine."
+        }
+      },
+      {
+        "@type": "Question",
+        "name": "Does it need a vector database or an embedding model?",
+        "acceptedAnswer": {
+          "@type": "Answer",
+          "text": "No. OpenCode Durable Memory ranks results with BM25F over the slug, description, and body fields at request time. There is no model to download, no index to build, no API key, and no cold start, and the same corpus and query always produce the same ordering."
+        }
+      },
+      {
+        "@type": "Question",
+        "name": "Does recall work with Korean or other CJK text?",
+        "acceptedAnswer": {
+          "@type": "Answer",
+          "text": "Yes. Tokenization includes Korean character n-grams, so queries and memories written without word spacing are still matched. This works without a language model and without a language-specific configuration step."
+        }
+      },
+      {
+        "@type": "Question",
+        "name": "Can a subagent write to memory?",
+        "acceptedAnswer": {
+          "@type": "Answer",
+          "text": "No. Every memory tool rejects a child session, or a session whose primary status cannot be resolved, with SESSION_NOT_VERIFIED before it reads or mutates anything. Only a verified primary session may persist memory, which keeps subagent output from entering long-term storage."
+        }
+      },
+      {
+        "@type": "Question",
+        "name": "What can automatic curation change without asking me?",
+        "acceptedAnswer": {
+          "@type": "Answer",
+          "text": "Only a duplicate it can prove locally. Automatic apply is limited to a duplicate-exact merge, where the parsed type, description, and body are equal after whitespace normalization and SHA-256 hashes fence stale or tampered sources. Every semantic judgment, such as similar, stale, or superseded, is report-only and waits for explicit approval."
+        }
+      },
+      {
+        "@type": "Question",
+        "name": "Can I recover a memory I deleted?",
+        "acceptedAnswer": {
+          "@type": "Answer",
+          "text": "Yes. Neither archive nor delete removes data. Each moves an immutable entry that keeps its origin metadata, and memory_restore brings back one exact (scope, source, entry_id) tuple at its original slug. Restore never overwrites, merges, or renames, and an already occupied slug returns ACTIVE_COLLISION without changing either copy."
+        }
+      },
+      {
+        "@type": "Question",
+        "name": "Is it published on npm?",
+        "acceptedAnswer": {
+          "@type": "Answer",
+          "text": "No. The plugin runs from a local checkout that OpenCode loads by absolute path, so cloning the repository is the installation. The four install steps on this page are the whole procedure."
+        }
+      }
+    ]
+  }
+  </script>
+  <style>
+    :root {
+      color-scheme: dark;
+      --canvas: #070b0f;
+      --canvas-deep: #04070a;
+      --surface: #0c1218;
+      --surface-raised: #111a22;
+      --surface-high: #16222c;
+      --surface-code: #091017;
+      --line: #23313c;
+      --line-strong: #344756;
+      --text: #eef5f4;
+      --text-soft: #b6c5c6;
+      --text-muted: #7f9297;
+      --cyan: #56d6cf;
+      --cyan-soft: #193b3d;
+      --amber: #e9b872;
+      --cyan-8: rgba(86, 214, 207, 0.08);
+      --cyan-24: rgba(86, 214, 207, 0.24);
+      --cyan-45: rgba(86, 214, 207, 0.45);
+      --white-35: rgba(255, 255, 255, 0.035);
+      --mono: "SFMono-Regular", "Cascadia Code", "Liberation Mono", Menlo, monospace;
+      --sans: "Avenir Next", "Apple SD Gothic Neo", "Noto Sans KR", "Segoe UI", sans-serif;
+      --step-1: 0.25rem;
+      --step-2: 0.5rem;
+      --step-3: 0.75rem;
+      --step-4: 1rem;
+      --step-5: 1.25rem;
+      --step-6: 1.5rem;
+      --step-8: 2rem;
+      --step-10: 2.5rem;
+      --step-12: 3rem;
+      --step-16: 4rem;
+      --radius-sm: 0.375rem;
+      --radius-md: 0.625rem;
+      --radius-lg: 0.875rem;
+      --font-xs: 0.875rem;
+      --font-sm: 0.94rem;
+      --font-body: 1rem;
+      --font-lg: 1.125rem;
+      --font-h3: 1.25rem;
+      --font-h2: clamp(1.5rem, 3vw, 2.1rem);
+      --font-display: clamp(2.1rem, 5vw, 3.4rem);
+      --shadow-panel: 0 1rem 3rem rgba(0, 0, 0, 0.28), inset 0 0.0625rem 0 rgba(255, 255, 255, 0.035);
+      --measure: 58rem;
+    }
+
+    * { box-sizing: border-box; }
+
+    html { scroll-behavior: smooth; }
+
+    body {
+      margin: 0;
+      background: var(--canvas);
+      color: var(--text);
+      font-family: var(--sans);
+      font-size: var(--font-body);
+      line-height: 1.65;
+      -webkit-font-smoothing: antialiased;
+    }
+
+    .wrap {
+      max-width: var(--measure);
+      margin: 0 auto;
+      padding: 0 var(--step-5);
+    }
+
+    a {
+      color: var(--cyan);
+      text-decoration: none;
+      border-bottom: 1px solid var(--cyan-24);
+    }
+
+    a:hover { border-bottom-color: var(--cyan-45); }
+
+    a:focus-visible {
+      outline: 2px solid var(--cyan);
+      outline-offset: 3px;
+      border-radius: var(--radius-sm);
+    }
+
+    code {
+      font-family: var(--mono);
+      font-size: 0.92em;
+      background: var(--surface-code);
+      border: 1px solid var(--line);
+      border-radius: var(--radius-sm);
+      padding: 0.1em 0.35em;
+      overflow-wrap: anywhere;
+      word-break: break-word;
+    }
+
+    pre {
+      background: var(--surface-code);
+      border: 1px solid var(--line);
+      border-left: 3px solid var(--cyan-soft);
+      border-radius: var(--radius-md);
+      padding: var(--step-4);
+      overflow-x: auto;
+      margin: var(--step-4) 0;
+    }
+
+    pre code {
+      background: none;
+      border: 0;
+      padding: 0;
+      font-size: var(--font-xs);
+      line-height: 1.7;
+      white-space: pre;
+      overflow-wrap: normal;
+      word-break: normal;
+      color: var(--text-soft);
+    }
+
+    header.masthead {
+      background: linear-gradient(180deg, var(--surface) 0%, var(--canvas) 100%);
+      border-bottom: 1px solid var(--line);
+      padding: var(--step-16) 0 var(--step-12);
+    }
+
+    .eyebrow {
+      font-family: var(--mono);
+      font-size: var(--font-xs);
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      color: var(--cyan);
+      margin: 0 0 var(--step-4);
+    }
+
+    h1 {
+      font-size: var(--font-display);
+      line-height: 1.08;
+      letter-spacing: -0.02em;
+      margin: 0 0 var(--step-5);
+    }
+
+    .lead {
+      font-size: var(--font-lg);
+      color: var(--text-soft);
+      margin: 0 0 var(--step-4);
+      max-width: 46rem;
+    }
+
+    .sub {
+      color: var(--text-muted);
+      margin: 0 0 var(--step-8);
+      max-width: 46rem;
+    }
+
+    .quicklinks {
+      display: flex;
+      flex-wrap: wrap;
+      gap: var(--step-3);
+      list-style: none;
+      margin: 0;
+      padding: 0;
+    }
+
+    .quicklinks a {
+      display: inline-block;
+      border: 1px solid var(--line-strong);
+      border-radius: var(--radius-sm);
+      padding: var(--step-2) var(--step-4);
+      background: var(--surface-raised);
+      color: var(--text);
+      font-size: var(--font-sm);
+    }
+
+    .quicklinks a:hover {
+      border-color: var(--cyan-45);
+      background: var(--surface-high);
+    }
+
+    main { padding: var(--step-12) 0 var(--step-8); }
+
+    section { margin-bottom: var(--step-16); scroll-margin-top: var(--step-6); }
+
+    h2 {
+      font-size: var(--font-h2);
+      line-height: 1.2;
+      letter-spacing: -0.01em;
+      margin: 0 0 var(--step-5);
+      padding-left: var(--step-4);
+      border-left: 3px solid var(--cyan);
+    }
+
+    h3 {
+      font-size: var(--font-h3);
+      margin: var(--step-8) 0 var(--step-3);
+      color: var(--text);
+    }
+
+    p { margin: 0 0 var(--step-4); color: var(--text-soft); }
+
+    .note {
+      border: 1px solid var(--line);
+      border-left: 3px solid var(--amber);
+      border-radius: var(--radius-md);
+      background: var(--white-35);
+      padding: var(--step-4);
+      margin: var(--step-4) 0;
+      color: var(--text-soft);
+      font-size: var(--font-sm);
+    }
+
+    .tablewrap {
+      overflow-x: auto;
+      border: 1px solid var(--line);
+      border-radius: var(--radius-lg);
+      background: var(--surface);
+      box-shadow: var(--shadow-panel);
+      margin: var(--step-4) 0;
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      min-width: 34rem;
+      font-size: var(--font-sm);
+    }
+
+    caption {
+      text-align: left;
+      padding: var(--step-4) var(--step-4) var(--step-2);
+      color: var(--text-muted);
+      font-size: var(--font-xs);
+      font-family: var(--mono);
+    }
+
+    th, td {
+      text-align: left;
+      vertical-align: top;
+      padding: var(--step-3) var(--step-4);
+      border-bottom: 1px solid var(--line);
+    }
+
+    thead th {
+      background: var(--surface-high);
+      color: var(--text);
+      font-size: var(--font-xs);
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+      white-space: nowrap;
+    }
+
+    tbody tr:last-child td { border-bottom: 0; }
+
+    tbody th {
+      color: var(--text);
+      font-weight: 600;
+      width: 32%;
+    }
+
+    tbody td { color: var(--text-soft); }
+
+    .doclist { list-style: none; padding: 0; margin: 0; }
+
+    .doclist li {
+      border-top: 1px solid var(--line);
+      padding: var(--step-4) 0;
+    }
+
+    .doclist li:first-child { border-top: 0; }
+
+    .doclist p { margin: var(--step-1) 0 0; font-size: var(--font-sm); color: var(--text-muted); }
+
+    footer {
+      border-top: 1px solid var(--line);
+      background: var(--canvas-deep);
+      padding: var(--step-8) 0;
+      color: var(--text-muted);
+      font-size: var(--font-sm);
+    }
+
+    footer p { color: var(--text-muted); margin: 0 0 var(--step-2); }
+
+    .updated { font-family: var(--mono); font-size: var(--font-xs); color: var(--cyan); }
+
+    @media (max-width: 48rem) {
+      header.masthead { padding: var(--step-10) 0 var(--step-8); }
+      section { margin-bottom: var(--step-12); }
+      tbody th { width: auto; }
+    }
+  </style>
+  <!-- Add the Google Search Console HTML-tag verification meta here when claiming this URL prefix. -->
+</head>
+<body>
+  <header class="masthead">
+    <div class="wrap">
+      <p class="eyebrow">OpenCode plugin</p>
+      <h1>OpenCode Durable Memory</h1>
+      <p class="lead">OpenCode Durable Memory is a plugin that gives the OpenCode coding agent memory that survives across sessions. Each memory is one human-readable Markdown file on your own disk. Recall is deterministic, runs locally, and never calls a model.</p>
+      <p class="sub">A compact pointer index is injected into the system prompt while bodies stay on disk until a tool reads them, so memory does not consume context it is not being used for. Global memories and per-workspace project memories live in separate stores. There is no database, no embedding model, no API key, and no network call on the read path.</p>
+      <ul class="quicklinks">
+        <li><a href="#install">Install</a></li>
+        <li><a href="#guarantees">Guarantees</a></li>
+        <li><a href="#compare">How it compares</a></li>
+        <li><a href="#faq">FAQ</a></li>
+        <li><a href="https://github.com/devonestar/opencode-durable-memory">Repository on GitHub</a></li>
+      </ul>
+    </div>
+  </header>
+
+  <main class="wrap">
+    <section id="guarantees">
+      <h2>Guarantees</h2>
+      <p>Durable agent memory usually fails in one of three ways. It loses facts, it silently rewrites them, or it quietly eats the context window. Each guarantee below closes one of those failures and is enforced by a normative RFC 2119 contract in the repository README.</p>
+      <div class="tablewrap">
+        <table>
+          <caption>Design guarantees and their observable effect</caption>
+          <thead>
+            <tr><th scope="col">Guarantee</th><th scope="col">What it means in practice</th></tr>
+          </thead>
+          <tbody>
+            <tr><th scope="row">Plain Markdown, no database</th><td>One <code>MEMORY.md</code> index plus one <code>&lt;slug&gt;.md</code> file per topic. Read, grep, diff, and edit memory in your own editor. Nothing is opaque or vendor-locked.</td></tr>
+            <tr><th scope="row">No embeddings, no vector store</th><td>Recall ranks with BM25F over slug, description, and body at request time. No model download, no index build, no API key, no cold start.</td></tr>
+            <tr><th scope="row">Deterministic ranking</th><td>The same corpus and query always produce the same order: descending score, then global before project, then slug by Unicode code point.</td></tr>
+            <tr><th scope="row">Korean and CJK recall</th><td>Tokenization includes Korean character n-grams, so text without word spacing stays searchable without a language model.</td></tr>
+            <tr><th scope="row">Two stores, never mixed</th><td>A scoped operation never falls back to the other scope, and a cross-scope search fails as a whole rather than returning half an answer. A broken store is fenced without disabling the healthy one.</td></tr>
+            <tr><th scope="row">Only the main session can write</th><td>Child and subagent sessions are rejected with <code>SESSION_NOT_VERIFIED</code>, so subagent chatter cannot pollute long-term memory.</td></tr>
+            <tr><th scope="row">Curation proves before it applies</th><td>Automatic apply is limited to a <code>duplicate-exact</code> merge, checked locally by parsed type, description, and body equality, with SHA-256 hashes fencing stale or tampered sources. Semantic judgments such as similar, stale, or superseded are report-only and wait for approval.</td></tr>
+            <tr><th scope="row">Curation is reversible and bounded</th><td>Recoverable pre-images are archived under <code>.trash/&lt;runId&gt;/</code> before any applied change, curation never hard-deletes a memory file, the curator subagent has no tools at all, and at most three suggestions reach one session.</td></tr>
+            <tr><th scope="row">Nothing is hard-deleted</th><td>Archive and delete each move one immutable entry that keeps its origin metadata. Restore addresses one exact <code>(scope, source, entry_id)</code> tuple and never overwrites, merges, or renames.</td></tr>
+            <tr><th scope="row">Crash-safe by fencing</th><td>An interrupted mutation either converges idempotently to its committed result or that store is fenced with <code>RECOVERY_BLOCKED</code>. A partial bundle never becomes visible to a reader.</td></tr>
+            <tr><th scope="row">Bounded context cost</th><td>Recall caps at 200 topics, 32 KiB per topic, 512 KiB aggregate, and a 25,000-byte response, and returns metadata only, never bodies.</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <section id="compare">
+      <h2>How it compares</h2>
+      <div class="tablewrap">
+        <table>
+          <caption>Comparison with other ways to give an agent memory</caption>
+          <thead>
+            <tr><th scope="col">Approach</th><th scope="col">Where this plugin differs</th></tr>
+          </thead>
+          <tbody>
+            <tr><th scope="row">Static instruction files such as AGENTS.md or CLAUDE.md</th><td>They sit fully in context, have no lifecycle or scoping, and grow without a budget. Here only a pointer index is injected and bodies are fetched on demand.</td></tr>
+            <tr><th scope="row">Hosted memory services</th><td>They need an API key and a network round trip, your facts leave the machine, and ranking is opaque. Here everything runs locally and the ranking formula is written down.</td></tr>
+            <tr><th scope="row">Embedding-based local plugins</th><td>They ship a model, build an index, return non-deterministic neighbours, and rarely guarantee CJK behaviour. BM25F is instant, reproducible, and tokenizes Korean n-grams.</td></tr>
+            <tr><th scope="row">Agent-managed memory</th><td>A model decides what to merge or drop. Here a model may only propose, and the single automatic apply is a locally proven exact duplicate.</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <p>The cost of this design is stated plainly rather than hidden: recall is lexical, so it will not surface a memory that shares no terms with the query. That is a deliberate trade for determinism, auditability, and zero inference cost.</p>
+    </section>
+
+    <section id="install">
+      <h2>Install</h2>
+      <p>Requires the <code>opencode</code> CLI and Bun. The plugin runs from a local checkout that OpenCode loads by absolute path. It is not published on npm, so these four steps are the whole installation and none of them need a placeholder filled in.</p>
+
+      <h3>1. Clone and verify</h3>
+<pre><code>git clone https://github.com/devonestar/opencode-durable-memory.git
+cd opencode-durable-memory
+bun install
+bun run typecheck</code></pre>
+
+      <h3>2. Register the plugin</h3>
+      <p>Add the absolute path to <code>src/index.ts</code> as one entry of the <code>plugin</code> array in <code>${XDG_CONFIG_HOME:-~/.config}/opencode/opencode.jsonc</code>. Print the exact value with <code>echo "$(pwd)/src/index.ts"</code>.</p>
+<pre><code>{
+  "plugin": ["/absolute/path/to/opencode-durable-memory/src/index.ts"]
+}</code></pre>
+      <p class="note">That bare string entry is a complete install. Save, recall, and lifecycle tools all work, and curation stays inert because <code>allowProviderEgress</code> defaults to <code>false</code>, so no memory content reaches a model provider until you opt in.</p>
+
+      <h3>3. Link the assets</h3>
+      <p>Run this from the repository root. It resolves its own paths.</p>
+<pre><code>REPO="$(pwd)"
+CONFIG_ROOT="${XDG_CONFIG_HOME:-$HOME/.config}/opencode"
+
+mkdir -p "$CONFIG_ROOT/agent" "$CONFIG_ROOT/command" "$CONFIG_ROOT/skills/memory-types"
+ln -sfn "$REPO/opencode/agent/memory-curator.md" "$CONFIG_ROOT/agent/memory-curator.md"
+ln -sfn "$REPO/opencode/command/memory-review.md" "$CONFIG_ROOT/command/memory-review.md"
+ln -sfn "$REPO/opencode/command/memory-curation-status.md" "$CONFIG_ROOT/command/memory-curation-status.md"
+ln -sfn "$REPO/opencode/command/memory-curation-run.md" "$CONFIG_ROOT/command/memory-curation-run.md"
+ln -sfn "$REPO/opencode/command/memory-curation-pause.md" "$CONFIG_ROOT/command/memory-curation-pause.md"
+ln -sfn "$REPO/opencode/command/memory-curation-resume.md" "$CONFIG_ROOT/command/memory-curation-resume.md"
+ln -sfn "$REPO/opencode/skills/memory-types/SKILL.md" "$CONFIG_ROOT/skills/memory-types/SKILL.md"</code></pre>
+
+      <h3>4. Restart and verify</h3>
+      <p>OpenCode loads configuration, plugins, agents, commands, and skills at startup, so quit and restart it, then confirm all three resolved.</p>
+<pre><code>opencode debug config
+opencode debug skill</code></pre>
+    </section>
+
+    <section id="tools">
+      <h2>Tools and commands</h2>
+      <div class="tablewrap">
+        <table>
+          <caption>Nine registered tools</caption>
+          <thead>
+            <tr><th scope="col">Tool</th><th scope="col">Purpose</th></tr>
+          </thead>
+          <tbody>
+            <tr><th scope="row"><code>memory_save(scope, type, slug, description, body)</code></th><td>Persist one durable learning to the global or project store.</td></tr>
+            <tr><th scope="row"><code>memory_recall(query, scope, limit)</code></th><td>Metadata-only BM25F search across active memory.</td></tr>
+            <tr><th scope="row"><code>memory_recall_archive(query, scope, limit)</code></th><td>The same search over archived entries in one scope.</td></tr>
+            <tr><th scope="row"><code>memory_archive(scope, slug)</code></th><td>Move one active topic out of use, keeping a recoverable entry.</td></tr>
+            <tr><th scope="row"><code>memory_delete(scope, slug)</code></th><td>Move one active topic to user trash, keeping a recoverable entry.</td></tr>
+            <tr><th scope="row"><code>memory_restore(scope, source, entry_id)</code></th><td>Restore one exact entry at its original slug.</td></tr>
+            <tr><th scope="row"><code>memory_curation_status()</code></th><td>Redacted curation state, eligibility metrics, and report availability.</td></tr>
+            <tr><th scope="row"><code>memory_curation_run(dryRun)</code></th><td>Force one curation run, bypassing thresholds and cooldown.</td></tr>
+            <tr><th scope="row"><code>memory_curation_control(action)</code></th><td>Pause or resume automatic and manual curation.</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="tablewrap">
+        <table>
+          <caption>Five slash commands</caption>
+          <thead>
+            <tr><th scope="col">Command</th><th scope="col">Purpose</th></tr>
+          </thead>
+          <tbody>
+            <tr><th scope="row"><code>/memory-review</code></th><td>Audit accumulated memories with a subagent and propose merges, rewrites, and deletions. Review only, never writes.</td></tr>
+            <tr><th scope="row"><code>/memory-curation-status</code></th><td>Show curation status, eligibility metrics, and report availability.</td></tr>
+            <tr><th scope="row"><code>/memory-curation-run</code></th><td>Force an asynchronous curation run that applies only locally validated safe operations.</td></tr>
+            <tr><th scope="row"><code>/memory-curation-pause</code></th><td>Pause automatic and manual curation.</td></tr>
+            <tr><th scope="row"><code>/memory-curation-resume</code></th><td>Resume automatic and manual curation.</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <section id="faq">
+      <h2>Frequently asked questions</h2>
+
+      <h3>Does this plugin send my memory to a model provider?</h3>
+      <p>Not unless you opt in. <code>allowProviderEgress</code> defaults to <code>false</code>, and while it is false every curation run is refused with the message that provider egress is disabled. Saving, recall, and the whole lifecycle path never contact a provider at all, so a default install keeps memory content on your own machine.</p>
+
+      <h3>Does it need a vector database or an embedding model?</h3>
+      <p>No. OpenCode Durable Memory ranks results with BM25F over the slug, description, and body fields at request time. There is no model to download, no index to build, no API key, and no cold start, and the same corpus and query always produce the same ordering.</p>
+
+      <h3>Does recall work with Korean or other CJK text?</h3>
+      <p>Yes. Tokenization includes Korean character n-grams, so queries and memories written without word spacing are still matched. This works without a language model and without a language-specific configuration step.</p>
+
+      <h3>Can a subagent write to memory?</h3>
+      <p>No. Every memory tool rejects a child session, or a session whose primary status cannot be resolved, with <code>SESSION_NOT_VERIFIED</code> before it reads or mutates anything. Only a verified primary session may persist memory, which keeps subagent output from entering long-term storage.</p>
+
+      <h3>What can automatic curation change without asking me?</h3>
+      <p>Only a duplicate it can prove locally. Automatic apply is limited to a <code>duplicate-exact</code> merge, where the parsed type, description, and body are equal after whitespace normalization and SHA-256 hashes fence stale or tampered sources. Every semantic judgment, such as similar, stale, or superseded, is report-only and waits for explicit approval.</p>
+
+      <h3>Can I recover a memory I deleted?</h3>
+      <p>Yes. Neither archive nor delete removes data. Each moves an immutable entry that keeps its origin metadata, and <code>memory_restore</code> brings back one exact <code>(scope, source, entry_id)</code> tuple at its original slug. Restore never overwrites, merges, or renames, and an already occupied slug returns <code>ACTIVE_COLLISION</code> without changing either copy.</p>
+
+      <h3>Is it published on npm?</h3>
+      <p>No. The plugin runs from a local checkout that OpenCode loads by absolute path, so cloning the repository is the installation. The four install steps on this page are the whole procedure.</p>
+    </section>
+
+    <section id="docs">
+      <h2>Documentation</h2>
+      <ul class="doclist">
+        <li>
+          <a href="https://github.com/devonestar/opencode-durable-memory/blob/main/README.md">README, the normative contract</a>
+          <p>Contains the RFC 2119 requirements, the exhaustive public error matrix, and the acceptance scenarios for every tool.</p>
+        </li>
+        <li>
+          <a href="https://github.com/devonestar/opencode-durable-memory/blob/main/README.ko.md">Korean documentation</a>
+          <p>The same guarantees, comparison, install steps, and contract in Korean.</p>
+        </li>
+        <li>
+          <a href="architecture.html">Architecture atlas</a>
+          <p>A self-contained diagram of the system layers, the storage topology, and the curation lifecycle.</p>
+        </li>
+        <li>
+          <a href="https://github.com/devonestar/opencode-durable-memory">Repository on GitHub</a>
+          <p>Source, issues, and the release history.</p>
+        </li>
+        <li>
+          <a href="https://github.com/devonestar/opencode-durable-memory/blob/main/LICENSE">MIT licence</a>
+          <p>The full licence text.</p>
+        </li>
+      </ul>
+    </section>
+  </main>
+
+  <footer>
+    <div class="wrap">
+      <p class="updated">Last updated 2026-08-22</p>
+      <p>OpenCode Durable Memory is an OpenCode plugin maintained by devonestar, released under the <a href="https://github.com/devonestar/opencode-durable-memory/blob/main/LICENSE">MIT licence</a>.</p>
+    </div>
+  </footer>
+</body>
+</html>
